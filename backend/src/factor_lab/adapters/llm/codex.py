@@ -51,12 +51,12 @@ class CodexExplainer:
                 kwargs["effort"] = self.effort
             result = thread.run(prompt, **kwargs)
             if result.final_response is None:
-                raise RuntimeError(f"codex turn ended without a response: {result.status}")
+                raise RuntimeError(f"языковая модель не вернула ответ: {result.status}")
             return result.final_response
 
     def explain(self, facts: dict[str, Any], question: str | None) -> dict[str, Any]:
         if not self.available():
-            raise RuntimeError(f"нет {self.codex_home}/auth.json")
+            raise RuntimeError("нет авторизации языковой модели")
         box: dict[str, Any] = {}
 
         def target():
@@ -70,7 +70,7 @@ class CodexExplainer:
         worker.start()
         worker.join(self.timeout_s)
         if worker.is_alive():
-            raise TimeoutError(f"codex не ответил за {self.timeout_s:.0f} с")
+            raise TimeoutError(f"языковая модель не ответила за {self.timeout_s:.0f} с")
         if "error" in box:
             raise box["error"]
         text = box["text"].strip()
