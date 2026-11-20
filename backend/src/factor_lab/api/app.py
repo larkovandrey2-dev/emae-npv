@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from ..application.analytics.panel import TARGETS
+from ..application.facts import build_facts
 from ..application.pipeline import RunRequest
 from ..config import Settings
 from ..container import Container, build
@@ -105,6 +106,13 @@ def create_app(container: Container | None = None) -> FastAPI:
             raise HTTPException(409, detail="run is still in progress")
         c().repository.delete(run_id)
         return Response(status_code=204)
+
+    @app.get("/api/v1/runs/{run_id}/facts")
+    def run_facts(run_id: str):
+        run = _run(run_id)
+        if run["status"] != "done":
+            raise HTTPException(409, detail="run is not finished")
+        return build_facts(run["result"])["facts"]
 
     @app.post("/api/v1/runs/{run_id}/explanations")
     async def ask(run_id: str, body: QuestionCreate):
