@@ -29,12 +29,9 @@ SHAPE_LABELS = {
 def money(v: float) -> str:
     a = abs(v)
     sign = "−" if v < 0 else ""
-    if a >= 1e9:
-        return f"{sign}{a / 1e9:.2f} млрд ₽".replace(".", ",")
-    if a >= 1e6:
-        return f"{sign}{a / 1e6:.2f} млн ₽".replace(".", ",")
-    if a >= 1e3:
-        return f"{sign}{a / 1e3:.1f} тыс. ₽".replace(".", ",")
+    for scale, unit, digits in ((1e9, "млрд ₽", 2), (1e6, "млн ₽", 2), (1e3, "тыс. ₽", 1)):
+        if a >= scale:
+            return f"{sign}{a / scale:.{digits}f}".replace(".", ",") + f" {unit}"
     return f"{sign}{a:.0f} ₽"
 
 

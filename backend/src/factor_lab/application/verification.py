@@ -18,7 +18,14 @@ MULT = {"млрд": 1e9, "млн": 1e6, "тыс": 1e3, "тыс.": 1e3}
 def _candidates(fact: dict[str, Any]) -> list[float]:
     v = fact.get("value")
     if not isinstance(v, (int, float)):
-        return []
+        # text facts may still carry numbers in their display form, e.g. "54 → 13"
+        out = []
+        for m in NUMBER.finditer(str(fact.get("display", ""))):
+            try:
+                out.append(_parse(m.group(1), m.group(2))[0])
+            except ValueError:
+                pass
+        return out
     v = float(v)
     if fact["unit"] in ("share", "ratio"):
         return [v, v * 100]

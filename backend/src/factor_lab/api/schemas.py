@@ -11,7 +11,7 @@ class RunCreate(BaseModel):
     end: date | None = None
     frequency: Literal["month", "quarter"] = "month"
     dates: list[date] = Field(default_factory=list, max_length=40)
-    target: str = Field("dnpv_worst", max_length=40, pattern=r"^[a-z_]+$")
+    target: str = Field("dnpv_worst_per_rub", max_length=40, pattern=r"^[a-z_]+$")
     explain: bool = True
 
     @field_validator("end")

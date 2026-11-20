@@ -27,7 +27,7 @@ class RunRequest:
     end: str | None = None
     frequency: str = "month"  # month | quarter
     dates: list[str] = field(default_factory=list)
-    target: str = "dnpv_worst"
+    target: str = "dnpv_worst_per_rub"
     explain: bool = True
     currency: str = "RUB"
 
@@ -160,7 +160,7 @@ class RunPipeline:
 
         step("Факторная модель: нелинейность, взаимодействия, устойчивость", 0.72)
         panel = build_panel([(s.report_date, s.deals, s.valuation, s.curves.base.features()) for s in states])
-        target = req.target if req.target in TARGETS or req.target.startswith("dnpv_") else "dnpv_worst"
+        target = req.target if req.target in TARGETS or req.target.startswith("dnpv_") else "dnpv_worst_per_rub"
         factor_model = analyze_panel(panel, PanelSpec(target=target), FIELD_LABELS)
 
         reliability, limitations = self._reliability(decomposition, factor_model, steps, len(states))

@@ -26,3 +26,8 @@ def test_template_explainer_is_self_consistent():
              "reliability": {"confidence": "medium", "reasons": ["мало периодов"]}, "limitations": []}
     answer = TemplateExplainer().explain(facts, None)
     assert verify_text(answer_texts(answer), facts["facts"])["status"] == "ok"
+
+
+def test_numbers_inside_text_facts_are_allowed():
+    facts = FACTS + [{"id": "F5", "label": "Число сделок", "value": "54 → 13", "unit": "text", "display": "54 → 13"}]
+    assert verify_text(["Сделок стало меньше: 54 → 13 [F5]."], facts)["status"] == "ok"

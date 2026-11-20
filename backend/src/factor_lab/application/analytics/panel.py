@@ -36,6 +36,7 @@ FIELD_LABELS = {
 }
 
 TARGETS = {
+    "dnpv_worst_per_rub": "ΔNPV в худшем сценарии на рубль остатка (чувствительность сделки)",
     "dnpv_worst": "ΔNPV сделки в худшем для портфеля сценарии периода",
     "npv_base": "NPV сделки в базовом сценарии",
 }
@@ -60,6 +61,9 @@ def build_panel(periods: list[tuple[str, list[DealRecord], Valuation, dict[str, 
             row.update(curve_features)
             row["npv_base"] = npv[BASE]
             row["dnpv_worst"] = npv[worst] - npv[BASE]
+            principal = float(deal.get("current_principal_amt") or 0)
+            if principal > 0:
+                row["dnpv_worst_per_rub"] = row["dnpv_worst"] / principal
             for scenario, value in npv.items():
                 if scenario != BASE:
                     row[f"dnpv_{scenario.lower()}"] = value - npv[BASE]
