@@ -96,6 +96,14 @@ class PostgresRunRepository:
         out["result"] = r[8]
         return out
 
+    def delete(self, run_id: str) -> bool:
+        try:
+            uuid.UUID(run_id)
+        except ValueError:
+            return False
+        with self.pool.connection() as c:
+            return c.execute("DELETE FROM runs WHERE id=%s AND status <> 'running'", (run_id,)).rowcount > 0
+
     def list(self, limit: int = 50) -> list[dict[str, Any]]:
         with self.pool.connection() as c:
             rows = c.execute(

@@ -98,6 +98,14 @@ def create_app(container: Container | None = None) -> FastAPI:
         run["explanations"] = c().repository.explanations(run_id)
         return run
 
+    @app.delete("/api/v1/runs/{run_id}", status_code=204)
+    def delete_run(run_id: str):
+        run = _run(run_id)
+        if run["status"] == "running":
+            raise HTTPException(409, detail="run is still in progress")
+        c().repository.delete(run_id)
+        return Response(status_code=204)
+
     @app.post("/api/v1/runs/{run_id}/explanations")
     async def ask(run_id: str, body: QuestionCreate):
         run = _run(run_id)
