@@ -77,7 +77,7 @@ class CodexExplainer:
         if text.startswith("```"):
             text = text.strip("`").removeprefix("json").strip()
         answer = json.loads(text)
-        for key in ("summary", "sections", "limitations", "confidence"):
+        for key in ("headline", "blocks", "follow_ups", "confidence"):
             if key not in answer:
                 raise ValueError(f"ответ модели без поля {key}")
         return answer

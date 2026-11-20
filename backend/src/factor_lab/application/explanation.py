@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,7 +14,20 @@ from .verification import verify_text
 log = logging.getLogger(__name__)
 
 
-def answer_texts(answer: dict[str, Any]) -> list[str]:
+PLACEHOLDER = re.compile(r"\{\{\s*(F\d+)\s*\}\}")
+
+
+def answer_texts(answer: dict[str, Any], facts: list[dict[str, Any]] | None = None) -> list[str]:
+    display = {f["id"]: f"{f['display']} [{f['id']}]" for f in facts or []}
+
+    def expand(text: str | None) -> str:
+        return PLACEHOLDER.sub(lambda m: display.get(m.group(1), f"[{m.group(1)}]"), text or "")
+
+    if "blocks" in answer:
+        texts = [expand(answer.get("headline"))]
+        texts += [expand(b.get("text")) for b in answer["blocks"] if b.get("text")]
+        texts += [f"[{fid}]" for b in answer["blocks"] for fid in (b.get("fact_ids") or [])]
+        return texts
     texts = [answer.get("summary", "")]
     texts += [s.get("text", "") for s in answer.get("sections", [])]
     texts += list(answer.get("limitations", []))
@@ -36,7 +50,7 @@ class ExplainService:
             note = f"{self.primary.name} недоступен ({exc}); использован {self.fallback.name}"
             provider, model = self.fallback.name, self.fallback.model
             answer = self.fallback.explain(facts, question)
-        verification = verify_text(answer_texts(answer), facts["facts"])
+        verification = verify_text(answer_texts(answer, facts["facts"]), facts["facts"])
         record = {
             "created_at": datetime.now(timezone.utc).isoformat(),
             "question": question,

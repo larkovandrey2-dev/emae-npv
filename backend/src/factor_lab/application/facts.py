@@ -131,6 +131,13 @@ def build_facts(result: dict[str, Any]) -> dict[str, Any]:
             fb.add(f"Устойчивость ранжирования факторов {label} (ρ Спирмена)", st[key], "ratio", num(st[key]),
                    f"factor_model.stability.{key}")
 
+    periods = result["periods"]
+    for i, p in enumerate(periods[1:-1], start=1):
+        fb.add(f"ЭКпрбк на {p['date']}", p["ec"], "RUB", money(p["ec"]), f"periods[{i}].ec")
+    for step in result.get("steps", []):
+        fb.add(f"Изменение ЭКпрбк {step['from']} → {step['to']}", step["ec"]["change"], "RUB",
+               money(step["ec"]["change"]), "steps.ec.change")
+
     reliability = result.get("reliability", {})
     return {
         "question_scope": "Факторный анализ изменения ЭКпрбк и NPV банковского портфеля (IRRBB)",

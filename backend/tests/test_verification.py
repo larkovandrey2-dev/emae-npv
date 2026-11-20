@@ -25,7 +25,16 @@ def test_template_explainer_is_self_consistent():
                                 "value": -2e6, "unit": "RUB", "display": "−2,00 млн ₽"}],
              "reliability": {"confidence": "medium", "reasons": ["мало периодов"]}, "limitations": []}
     answer = TemplateExplainer().explain(facts, None)
-    assert verify_text(answer_texts(answer), facts["facts"])["status"] == "ok"
+    assert answer["blocks"] and "{{" in answer["headline"]
+    assert verify_text(answer_texts(answer, facts["facts"]), facts["facts"])["status"] == "ok"
+
+
+def test_placeholders_expand_and_unknown_ids_are_flagged():
+    answer = {"headline": "ЭК изменился на {{F1}}", "blocks": [
+        {"type": "metrics", "text": None, "fact_ids": ["F2", "F7"], "chart": None, "metric": None, "tone": None}],
+        "follow_ups": [], "confidence": "medium"}
+    v = verify_text(answer_texts(answer, FACTS), FACTS)
+    assert v["unknown_fact_ids"] == ["F7"] and v["unverified_numbers"] == []
 
 
 def test_numbers_inside_text_facts_are_allowed():

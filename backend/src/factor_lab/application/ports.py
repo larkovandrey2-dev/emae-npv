@@ -71,7 +71,7 @@ class Explainer(Protocol):
     model: str | None
 
     def explain(self, facts: dict[str, Any], question: str | None) -> dict[str, Any]:
-        """Returns {"summary": str, "sections": [{"title", "text"}], "limitations": [str],
-        "confidence": "high|medium|low"}; every number must come from `facts`."""
+        """Returns {"headline": str, "blocks": [{"type", "text", "fact_ids", "chart", "metric", "tone"}],
+        "follow_ups": [str], "confidence": "high|medium|low"}; numbers appear only as {{F#}} placeholders."""
 
     def available(self) -> bool: ...
