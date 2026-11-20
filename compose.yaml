@@ -1,0 +1,12 @@
+services:
+  factor-lab:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - factor-lab-data:/app/.runtime
+    restart: unless-stopped
+volumes:
+  factor-lab-data:

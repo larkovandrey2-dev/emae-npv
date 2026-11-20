@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/F14my/cashflow-rs.git",
+  "commit": "d61cfd606ab0db607b541af80da8bd04b79d6ed4",
+  "package_version": "0.2.0",
+  "cargo_lock_sha256": "688e002c4bf4f2cf6eb355d19b83f94a3f6404761fc77e8539057550c0fafe6d",
+  "rust_toolchain": "1.90.0",
+  "binary": "cfcalc",
+  "build_command": "cargo build --locked --release --bin cfcalc",
+  "integration": "cli_csv",
+  "automatic_update": false,
+  "review_date": "2026-10-31"
+}
