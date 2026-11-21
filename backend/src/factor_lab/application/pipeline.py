@@ -28,6 +28,11 @@ UPLOAD_PARALLEL = 4  # upload requests in flight at once
 MAX_EXCLUDED = 200  # excluded deals listed in the result; the rest are only counted
 
 
+def _n(value: int) -> str:
+    """Thousands separated by spaces: 2 474 921."""
+    return f"{value:,}".replace(",", " ")
+
+
 @dataclass
 class Upload:
     rows: int = 0
@@ -49,6 +54,11 @@ class RunRequest:
     target: str = "dnpv_worst_per_rub"
     explain: bool = True
     currency: str = "RUB"
+    # generated portfolio to run on (None: the configured deal source)
+    dataset: str | None = None
+    # behavioural prepayment in the calculator; rates override the standard CPR per model code
+    prepayment: bool = True
+    prepayment_rates: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
@@ -99,23 +109,24 @@ class RunPipeline:
             raise ValueError(f"периоды должны начинаться не раньше даты среза сделок {report_date}")
         return dates
 
-    def run(self, run_id: str, req: RunRequest) -> None:
+    def run(self, run_id: str, req: RunRequest, source: DealSource | None = None) -> None:
         try:
-            result = self._run(run_id, req)
+            result = self._run(run_id, req, source or self.deals)
             self.repo.complete(run_id, result)
         except Exception as exc:  # the run record must always end in a terminal state
             log.error("run_failed id=%s: %s\n%s", run_id, exc, traceback.format_exc())
             self.repo.fail(run_id, str(exc))
 
-    def _run(self, run_id: str, req: RunRequest) -> dict[str, Any]:
+    def _run(self, run_id: str, req: RunRequest, source: DealSource) -> dict[str, Any]:
         step = lambda stage, p: self.repo.progress(run_id, stage, p)  # noqa: E731
-        session = self.calculator.open_portfolio()
+        prepayment = {"enabled": req.prepayment, "rates": dict(req.prepayment_rates)}
+        session = self.calculator.open_portfolio(prepayment)
         try:
-            return self._run_in(session, run_id, req, step)
+            return self._run_in(session, run_id, req, step, source)
         finally:
             session.close()
 
-    def _upload(self, session: PortfolioSession, currency: str, step) -> Upload:
+    def _upload(self, session: PortfolioSession, currency: str, step, source: DealSource) -> Upload:
         """Streams the source into the calculator in JSON batches, several in flight at once.
 
         On the way it collects the report dates and a reservoir sample of deals for the
@@ -134,7 +145,7 @@ class RunPipeline:
                     up.rejected.append({"deal_id": str(x.get("deal_id", "")), "reason": x["error"]})
 
         with ThreadPoolExecutor(UPLOAD_PARALLEL) as pool:
-            for batch in self.deals.batches(UPLOAD_BATCH):
+            for batch in source.batches(UPLOAD_BATCH):
                 mine = []
                 for d in batch:
                     up.rows += 1
@@ -155,16 +166,17 @@ class RunPipeline:
                 in_flight.append(pool.submit(session.upload, mine, currency))
                 while len(in_flight) >= UPLOAD_PARALLEL * 2:
                     settle(in_flight.popleft())
-                step(f"Загрузка сделок в калькулятор: {up.matched:,} из прочитанных {up.rows:,}".replace(",", " "),
+                step(f"Загрузка сделок в калькулятор: {_n(up.matched)} из прочитанных {_n(up.rows)}",
                      0.02 + min(0.08, 0.08 * up.rows / max(up.rows + 1, 2_500_000)))
             while in_flight:
                 settle(in_flight.popleft())
         up.sample = {d["deal_id"]: d for d in up.sample_seen}
         return up
 
-    def _run_in(self, session: PortfolioSession, run_id: str, req: RunRequest, step) -> dict[str, Any]:
+    def _run_in(self, session: PortfolioSession, run_id: str, req: RunRequest, step,
+                source: DealSource) -> dict[str, Any]:
         step("Загрузка сделок в калькулятор", 0.02)
-        up = self._upload(session, req.currency, step)
+        up = self._upload(session, req.currency, step, source)
         if up.matched == 0:
             raise ValueError(f"в источнике нет сделок в валюте {req.currency}")
         if len(up.report_dates) != 1:
@@ -178,7 +190,7 @@ class RunPipeline:
             snapshots[d] = self.curves.snapshot(d)
             step(f"Кривая на {d}: торговый день {snapshots[d].base.trade_date}", 0.1 + 0.15 * (i + 1) / len(dates))
 
-        step(f"Графики платежей и остатки {up.accepted:,} сделок на {len(dates)} дат".replace(",", " "), 0.26)
+        step(f"Графики платежей и остатки {_n(up.accepted)} сделок на {len(dates)} дат", 0.26)
         sealed = session.seal(dates)
         excluded = list(up.rejected)
         excluded_total = up.rejected_total + sealed["failed_total"]
@@ -197,7 +209,7 @@ class RunPipeline:
             for k, msg in v.failures.items():
                 if len(excluded) < MAX_EXCLUDED:
                     excluded.append({"deal_id": k, "reason": f"{d}: {msg}"})
-            step(f"NPV на {d}: {v.valued:,} сделок, 7 сценариев".replace(",", " "), 0.3 + 0.18 * (i + 1) / len(dates))
+            step(f"NPV на {d}: {_n(v.valued)} сделок, 7 сценариев", 0.3 + 0.18 * (i + 1) / len(dates))
 
         periods = []
         for s in states:
@@ -235,22 +247,25 @@ class RunPipeline:
                    for m in ("ec", "npv_base")},
             })
 
-        step(f"Факторная модель на выборке {len(up.sample):,} сделок".replace(",", " "), 0.72)
+        step(f"Факторная модель на выборке {_n(len(up.sample))} сделок", 0.72)
         panel = build_panel([(s.report_date, self._sample_deals(up.sample, s), s.valuation, s.curves.base.features())
                              for s in states])
         target = req.target if req.target in TARGETS or req.target.startswith("dnpv_") else "dnpv_worst_per_rub"
         factor_model = analyze_panel(panel, PanelSpec(target=target), FIELD_LABELS)
         factor_model["sample"] = {"deals": len(up.sample), "of": up.accepted}
 
-        reliability, limitations = self._reliability(decomposition, factor_model, steps, len(states))
+        behaviour = sealed.get("behaviour") or {}
+        reliability, limitations = self._reliability(decomposition, factor_model, steps, len(states), behaviour)
         if len(up.sample) < up.accepted:
             limitations.append(
-                f"Факторная модель обучена на случайной выборке {len(up.sample):,} сделок из {up.accepted:,}; "
-                "итоги, разложение и топ сделок посчитаны по всему портфелю.".replace(",", " "))
+                f"Факторная модель обучена на случайной выборке {_n(len(up.sample))} сделок из {_n(up.accepted)}; "
+                "итоги, разложение и топ сделок посчитаны по всему портфелю.")
         result: dict[str, Any] = {
             "request": req.to_dict(),
-            "source": {"deals": self.deals.describe(), "report_date": report_date, "loaded": up.accepted,
-                       "valued": sealed["valid"], "excluded": excluded, "excluded_total": excluded_total},
+            "source": {"deals": source.describe(), "dataset": req.dataset, "report_date": report_date,
+                       "loaded": up.accepted, "valued": sealed["valid"], "excluded": excluded,
+                       "excluded_total": excluded_total},
+            "behaviour": behaviour,
             "periods": periods,
             "decomposition": decomposition,
             "steps": steps,
@@ -287,7 +302,8 @@ class RunPipeline:
         return out
 
     @staticmethod
-    def _reliability(dec: dict, model: dict, steps: list, n_periods: int) -> tuple[dict, list[str]]:
+    def _reliability(dec: dict, model: dict, steps: list, n_periods: int,
+                     behaviour: dict | None = None) -> tuple[dict, list[str]]:
         reasons, limitations = [], []
         ec = dec["metrics"]["ec"]
         if abs(ec["change"]) > 0 and abs(ec["residual"]) > 0.01 * abs(ec["change"]):
@@ -306,9 +322,19 @@ class RunPipeline:
         limitations += [
             "Вклады групп факторов точны для пары дат (разложение пересчитывает калькулятор), "
             "но глобальная важность и формы зависимостей — оценка суррогатной модели.",
-            "Сделки двигаются во времени по контрактному графику без новых выдач и досрочных погашений.",
-            "Поведенческие модели (prepayment) калькулятором не применяются.",
         ]
+        prepay = (behaviour or {}).get("prepayment") or {}
+        if prepay.get("enabled") and prepay.get("deals"):
+            deals = _n(prepay["deals"])
+            limitations.append(
+                f"Досрочные погашения учтены для {deals} сделок с моделью поведения: постоянная "
+                "годовая ставка CPR по коду модели, одинаковая во всех сценариях; новые выдачи не моделируются.")
+            if prepay.get("unknown_models"):
+                limitations.append("Коды моделей без ставки CPR (сделки идут по договорному графику): "
+                                   + ", ".join(sorted(prepay["unknown_models"])))
+        else:
+            limitations.append("Сделки двигаются во времени по договорному графику: без новых выдач и "
+                               "досрочных погашений.")
         if n_periods < 6:
             limitations.append("Периодов меньше шести — выводы об устойчивости во времени предварительные.")
         if ec["linear_baseline"]["unexplained_share"] and abs(ec["linear_baseline"]["unexplained_share"]) > 0.1:

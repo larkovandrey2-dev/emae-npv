@@ -35,11 +35,15 @@ def curves_payload(curves: dict[str, Curve]) -> list[dict]:
 class HttpPortfolioSession:
     """Portfolio held by cashflow-rs (`/api/v1/portfolios`): JSON batches in, totals out."""
 
-    def __init__(self, client: httpx.Client, base_url: str, indicators: list[dict], retries: int = 2):
+    def __init__(self, client: httpx.Client, base_url: str, indicators: list[dict], retries: int = 2,
+                 prepayment: dict | None = None):
         self.client = client
         self.base = base_url
         self.retries = retries
-        created = self._call("POST", "/api/v1/portfolios", {"indicators": indicators})
+        body: dict = {"indicators": indicators}
+        if prepayment is not None:
+            body["prepayment"] = prepayment
+        created = self._call("POST", "/api/v1/portfolios", body)
         self.id = created["id"]
         self.path = f"/api/v1/portfolios/{self.id}"
 
@@ -115,8 +119,13 @@ class CashflowHttpCalculator:
                     {"effective_date": row["effective_date"], "rate_percent": float(row["rate_percent"])})
         return [{"code": c, "points": pts} for c, pts in series.items()]
 
-    def open_portfolio(self) -> HttpPortfolioSession:
-        return HttpPortfolioSession(self.client, self.base_url, self.indicators)
+    def open_portfolio(self, prepayment: dict | None = None) -> HttpPortfolioSession:
+        return HttpPortfolioSession(self.client, self.base_url, self.indicators, prepayment=prepayment)
+
+    def prepayment_defaults(self) -> dict:
+        r = self.client.get(f"{self.base_url}/api/v1/prepayment", timeout=5)
+        r.raise_for_status()
+        return r.json()
 
     def health(self) -> bool:
         try:

@@ -5,7 +5,7 @@ WORKDIR /app
 COPY backend/requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt \
     && useradd --uid 10001 --create-home factorlab \
-    && mkdir -p /codex-home && chown factorlab /codex-home
+    && mkdir -p /codex-home /data/datasets && chown factorlab /codex-home /data/datasets
 COPY backend/src ./src
 COPY backend/migrations ./migrations
 COPY data ./data
@@ -13,7 +13,8 @@ ENV PYTHONPATH=/app/src \
     MIGRATIONS_DIR=/app/migrations \
     DEALS_SOURCE=/app/data/deals.csv \
     INDICATORS_CSV=/app/data/indicators.csv \
-    CODEX_HOME=/codex-home
+    CODEX_HOME=/codex-home \
+    DATASETS_DIR=/data/datasets
 USER factorlab
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s \

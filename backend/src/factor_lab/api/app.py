@@ -10,15 +10,16 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from ..application.analytics.panel import TARGETS
 from ..application.facts import build_facts
+from ..application.generator import GeneratorParams
 from ..application.pipeline import RunRequest
 from ..config import Settings
 from ..container import Container, build
-from .schemas import QuestionCreate, RunCreate
+from .schemas import DatasetCreate, QuestionCreate, RunCreate
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger(__name__)
@@ -60,10 +61,66 @@ def create_app(container: Container | None = None) -> FastAPI:
                 "services": services,
                 "llm": {"provider": cont.primary_explainer.name, "model": cont.primary_explainer.model}}
 
+    def source(dataset: str | None):
+        try:
+            return c().datasets.source(dataset)
+        except LookupError as exc:
+            raise HTTPException(404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+
     @app.get("/api/v1/deals")
-    def deals():
-        cont = c()
-        return {"source": cont.deals.describe(), **cont.deals.summary()}
+    def deals(dataset: str | None = None):
+        src = source(dataset)
+        return {"source": src.describe(), "dataset": dataset or "default", **src.summary()}
+
+    @app.get("/api/v1/generator/defaults")
+    def generator_defaults():
+        return GeneratorParams().to_dict()
+
+    @app.get("/api/v1/prepayment")
+    def prepayment_defaults():
+        try:
+            return c().calculator.prepayment_defaults()
+        except Exception as exc:
+            raise HTTPException(502, detail=f"калькулятор не ответил: {exc}") from exc
+
+    @app.get("/api/v1/datasets")
+    def list_datasets():
+        return c().datasets.repo.list()
+
+    @app.post("/api/v1/datasets", status_code=202)
+    def create_dataset(body: DatasetCreate):
+        params = GeneratorParams.from_dict(body.params)  # ValueError -> 422
+        name = body.name.strip() or f"Синтетический портфель, {params.rows:,} сделок".replace(",", " ")
+        return c().datasets.start(name, params)
+
+    def _dataset(dataset_id: str) -> dict:
+        record = c().datasets.repo.get(dataset_id)
+        if not record:
+            raise HTTPException(404, detail="dataset not found")
+        return record
+
+    @app.get("/api/v1/datasets/{dataset_id}")
+    def get_dataset(dataset_id: str):
+        return _dataset(dataset_id)
+
+    @app.delete("/api/v1/datasets/{dataset_id}", status_code=204)
+    def delete_dataset(dataset_id: str):
+        record = _dataset(dataset_id)
+        if record["status"] == "running":
+            raise HTTPException(409, detail="dataset is still being generated")
+        c().datasets.repo.delete(dataset_id)
+        c().datasets.forget(dataset_id)
+        return Response(status_code=204)
+
+    @app.get("/api/v1/datasets/{dataset_id}/download")
+    def download_dataset(dataset_id: str):
+        record = _dataset(dataset_id)
+        if record["status"] != "done":
+            raise HTTPException(409, detail="dataset is not ready")
+        return FileResponse(record["path"], media_type="text/csv; charset=utf-8",
+                            filename=f"deals-{dataset_id[:8]}.csv")
 
     @app.get("/api/v1/targets")
     def targets():
@@ -79,8 +136,12 @@ def create_app(container: Container | None = None) -> FastAPI:
             dates=[d.isoformat() for d in body.dates],
             target=body.target,
             explain=body.explain,
+            dataset=None if body.dataset in (None, "", "default") else body.dataset,
+            prepayment=body.prepayment,
+            prepayment_rates=body.prepayment_rates,
         )
-        report_dates = cont.deals.summary()["report_dates"]
+        src = source(req.dataset)
+        report_dates = src.summary()["report_dates"]
         if not report_dates:
             raise HTTPException(422, detail="в источнике нет сделок")
         report = report_dates[0]
@@ -89,7 +150,7 @@ def create_app(container: Container | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(422, detail=str(exc)) from exc
         run_id = cont.repository.create({**req.to_dict(), "periods": req_periods})
-        runner.submit(cont.pipeline.run, run_id, req)
+        runner.submit(cont.pipeline.run, run_id, req, src)
         return {"id": run_id, "status": "running", "periods": req_periods}
 
     @app.get("/api/v1/runs")

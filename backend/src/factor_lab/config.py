@@ -22,6 +22,7 @@ class Settings:
     workers: int
     panel_sample: int
     migrations: Path
+    datasets_dir: Path
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -43,4 +44,5 @@ class Settings:
             workers=int(env("WORKERS", "2")),
             panel_sample=int(env("PANEL_SAMPLE", "5000")),
             migrations=Path(env("MIGRATIONS_DIR", str(ROOT / "migrations"))),
+            datasets_dir=Path(env("DATASETS_DIR", str(ROOT.parent / "data" / "datasets"))),
         )

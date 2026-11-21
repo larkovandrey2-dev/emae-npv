@@ -60,6 +60,9 @@ def summarize(rows: Iterable[DealRecord]) -> dict[str, Any]:
     rub = 0
     by_year: dict[int, float] = {}
     by_product: dict[str, dict[str, float]] = {}
+    by_kind: dict[str, dict[str, float]] = {}
+    by_model: dict[str, dict[str, float]] = {}
+    subsidy = {"count": 0, "principal": 0.0}
     tops: dict[str, list[tuple[float, int, dict]]] = {"all": [], "FIXED": [], "FLOAT": []}
     for i, r in enumerate(rows):
         count += 1
@@ -76,9 +79,14 @@ def summarize(rows: Iterable[DealRecord]) -> dict[str, Any]:
             year = (r.get("maturity_dttm") or "")[:4]
             if year.isdigit():
                 by_year[int(year)] = by_year.get(int(year), 0.0) + amount
-            prod = by_product.setdefault(r.get("product") or "", {"count": 0, "principal": 0.0})
-            prod["count"] += 1
-            prod["principal"] += amount
+            for bucket, key in ((by_product, r.get("product") or ""), (by_kind, r.get("discriminator") or ""),
+                                (by_model, r.get("behavior_model_cd") or "")):
+                slot = bucket.setdefault(key, {"count": 0, "principal": 0.0})
+                slot["count"] += 1
+                slot["principal"] += amount
+            if r.get("sub_rate_type_cd"):
+                subsidy["count"] += 1
+                subsidy["principal"] += amount
         item = (amount, -i, {k: r.get(k, "") for k in TABLE_FIELDS})
         for key in ("all", r.get("rate_type_cd", "")):
             heap = tops.get(key)
@@ -99,6 +107,11 @@ def summarize(rows: Iterable[DealRecord]) -> dict[str, Any]:
             "float_share": floating / principal if principal else 0.0,
             "by_year": sorted(by_year.items()),
             "by_product": [{"product": k, **v} for k, v in sorted(by_product.items(), key=lambda x: -x[1]["principal"])],
+            "by_discriminator": [{"discriminator": k, **v}
+                                 for k, v in sorted(by_kind.items(), key=lambda x: -x[1]["principal"])],
+            "by_behavior_model": [{"model": k, **v}
+                                  for k, v in sorted(by_model.items(), key=lambda x: -x[1]["principal"])],
+            "subsidy": subsidy,
         },
         "largest": {k: [x[2] for x in sorted(v, reverse=True)] for k, v in tops.items()},
     }

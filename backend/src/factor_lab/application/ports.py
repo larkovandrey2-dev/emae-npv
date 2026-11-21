@@ -78,7 +78,8 @@ class PortfolioSession(Protocol):
 
 
 class Calculator(Protocol):
-    def open_portfolio(self) -> PortfolioSession: ...
+    def open_portfolio(self, prepayment: dict[str, Any] | None = None) -> PortfolioSession:
+        """`prepayment`: {"enabled": bool, "rates": {model code: annual CPR}}; None — calculator default."""
 
     def health(self) -> bool: ...
 

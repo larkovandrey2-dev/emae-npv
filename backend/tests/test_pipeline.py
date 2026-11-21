@@ -66,7 +66,9 @@ class Session:
         return {"accepted": len(ok), "skipped": len(deals) - len(ok), "rejected_total": 0, "rejected": [], "total": len(self.deals)}
 
     def seal(self, dates):
-        return {"deals": len(self.deals), "valid": len(self.deals), "failed_total": 0, "failures": []}
+        return {"deals": len(self.deals), "valid": len(self.deals), "failed_total": 0, "failures": [],
+                "behaviour": {"prepayment": {"enabled": True, "deals": 3, "by_model": {}, "unknown_models": {}},
+                              "subsidy": {"deals": 1, "principal": 1000.0}}}
 
     def _deal(self, d, as_of):
         rd, mat = date(2022, 8, 31), date.fromisoformat(d["maturity_dttm"])
@@ -113,7 +115,8 @@ class Calc:
     def __init__(self):
         self.session = None
 
-    def open_portfolio(self):
+    def open_portfolio(self, prepayment=None):
+        self.prepayment = prepayment
         self.session = Session()
         return self.session
 
@@ -177,3 +180,23 @@ def test_factor_model_uses_a_sample_of_large_portfolios():
     assert any("выборке 5 сделок из 12" in x for x in res["limitations"])
     # totals still cover the whole portfolio
     assert res["periods"][0]["deals"] == 12
+
+
+def test_runs_take_the_requested_source_and_prepayment():
+    repo = Repo()
+    t = TemplateExplainer()
+    calc = Calc()
+
+    class Other(Deals):
+        def describe(self):
+            return "generated"
+
+    pipe = RunPipeline(Deals(), Curves(), calc, repo, ExplainService(t, t, repo), workers=1, panel_sample=12)
+    req = RunRequest(start="2022-08-31", end="2022-10-31", explain=False, dataset="d1",
+                     prepayment_rates={"PREPAYMENT_AUTO": 0.3})
+    pipe.run("r", req, Other())
+    res = repo.runs["r"]["result"]
+    assert res["source"]["deals"] == "generated" and res["source"]["dataset"] == "d1"
+    assert calc.prepayment == {"enabled": True, "rates": {"PREPAYMENT_AUTO": 0.3}}
+    assert res["behaviour"]["prepayment"]["deals"] == 3
+    assert any("Досрочные погашения учтены для 3 сделок" in x for x in res["limitations"])

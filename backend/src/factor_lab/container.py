@@ -6,10 +6,12 @@ from dataclasses import dataclass
 
 from .adapters.cashflow_http import CashflowHttpCalculator
 from .adapters.curve_parser_http import CurveParserClient
-from .adapters.deal_source import deal_source
+from .adapters.dataset_repo import PostgresDatasetRepository
+from .adapters.deal_source import CsvFileDealSource, deal_source
 from .adapters.llm.codex import CodexExplainer
 from .adapters.llm.template import TemplateExplainer
 from .adapters.postgres_repo import PostgresRunRepository
+from .application.datasets import DatasetService
 from .application.explanation import ExplainService
 from .application.pipeline import RunPipeline
 from .config import Settings
@@ -25,6 +27,7 @@ class Container:
     explain: ExplainService
     pipeline: RunPipeline
     primary_explainer: object
+    datasets: DatasetService
 
 
 def build(settings: Settings) -> Container:
@@ -40,4 +43,5 @@ def build(settings: Settings) -> Container:
     )
     explain = ExplainService(primary, template, repo)
     pipeline = RunPipeline(deals, curves, calculator, repo, explain, settings.workers, settings.panel_sample)
-    return Container(settings, repo, calculator, curves, deals, explain, pipeline, primary)
+    datasets = DatasetService(PostgresDatasetRepository(repo.pool, settings.datasets_dir), deals, CsvFileDealSource)
+    return Container(settings, repo, calculator, curves, deals, explain, pipeline, primary, datasets)
