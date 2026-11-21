@@ -1,4 +1,4 @@
-"""Structured, citable facts handed to the LLM. Every number has an id and a source path."""
+"""Structured analysis facts with stable identifiers and source paths."""
 
 from __future__ import annotations
 

@@ -11,7 +11,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
-from starlette.concurrency import run_in_threadpool
 
 from ..application.analytics.panel import TARGETS
 from ..application.facts import build_facts
@@ -19,7 +18,7 @@ from ..application.generator import GeneratorParams
 from ..application.pipeline import RunRequest
 from ..config import Settings
 from ..container import Container, build
-from .schemas import DatasetCreate, QuestionCreate, RunCreate
+from .schemas import DatasetCreate, RunCreate
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger(__name__)
@@ -49,17 +48,16 @@ def create_app(container: Container | None = None) -> FastAPI:
         return app.state.c
 
     @app.get("/api/v1/health")
-    def health():
+    def health(response: Response):
         cont = c()
         services = {
             "database": cont.repository.ping(),
             "calculator": cont.calculator.health(),
             "curves": cont.curves.health(),
-            "llm": cont.primary_explainer.available(),
         }
-        return {"status": "ok" if all(v for k, v in services.items() if k != "llm") else "degraded",
-                "services": services,
-                "llm": {"provider": cont.primary_explainer.name, "model": cont.primary_explainer.model}}
+        ready = all(services.values())
+        response.status_code = 200 if ready else 503
+        return {"status": "ok" if ready else "degraded", "services": services}
 
     def source(dataset: str | None):
         try:
@@ -135,7 +133,6 @@ def create_app(container: Container | None = None) -> FastAPI:
             frequency=body.frequency,
             dates=[d.isoformat() for d in body.dates],
             target=body.target,
-            explain=body.explain,
             dataset=None if body.dataset in (None, "", "default") else body.dataset,
             prepayment=body.prepayment,
             prepayment_rates=body.prepayment_rates,
@@ -166,7 +163,6 @@ def create_app(container: Container | None = None) -> FastAPI:
     @app.get("/api/v1/runs/{run_id}")
     def get_run(run_id: str):
         run = _run(run_id)
-        run["explanations"] = c().repository.explanations(run_id)
         return run
 
     @app.delete("/api/v1/runs/{run_id}", status_code=204)
@@ -183,13 +179,6 @@ def create_app(container: Container | None = None) -> FastAPI:
         if run["status"] != "done":
             raise HTTPException(409, detail="run is not finished")
         return build_facts(run["result"])["facts"]
-
-    @app.post("/api/v1/runs/{run_id}/explanations")
-    async def ask(run_id: str, body: QuestionCreate):
-        run = _run(run_id)
-        if run["status"] != "done":
-            raise HTTPException(409, detail="run is not finished")
-        return await run_in_threadpool(c().explain.explain, run_id, run["result"], body.question)
 
     @app.get("/api/v1/runs/{run_id}/export.csv")
     def export(run_id: str):

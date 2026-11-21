@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import math
 from pathlib import Path
 
 import httpx
@@ -15,6 +16,33 @@ from ..domain.portfolio import DealRecord, ScheduledFlow
 
 class CalculatorError(RuntimeError):
     pass
+
+
+def _validate_valuation_response(data: object, scenarios: list[str]) -> dict:
+    """Reject truncated or partial cashflow-rs responses before exposing results."""
+    try:
+        if not isinstance(data, dict) or not isinstance(data.get("scenarios"), list) or not isinstance(data.get("deals"), list):
+            raise ValueError("missing scenarios or deals")
+        totals = {row["scenario"]: float(row["total"]["npv"]) for row in data["scenarios"]}
+        if set(totals) != set(scenarios) or len(data["scenarios"]) != len(scenarios):
+            raise ValueError("portfolio scenario totals are incomplete")
+        if any(not math.isfinite(v) for v in totals.values()):
+            raise ValueError("portfolio contains a non-finite NPV")
+        for deal in data["deals"]:
+            rows = deal.get("scenarios")
+            if not isinstance(rows, list):
+                raise ValueError("deal is missing scenario results")
+            names = [row.get("scenario") for row in rows]
+            if len(names) != len(scenarios) or set(names) != set(scenarios):
+                raise ValueError(f"deal {deal.get('deal_id')} has incomplete scenario results")
+            for row in rows:
+                if not row.get("error"):
+                    npv = float(row["summary"]["npv"])
+                    if not math.isfinite(npv):
+                        raise ValueError("deal contains a non-finite NPV")
+        return data
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise CalculatorError(f"неполный ответ калькулятора: {exc}") from exc
 
 
 def curves_payload(curves: dict[str, Curve]) -> list[dict]:
@@ -53,7 +81,10 @@ class HttpPortfolioSession:
                 r = self.client.request(method, f"{self.base}{path}", json=body, params=params)
                 break
             except httpx.TransportError as exc:
-                if attempt == self.retries:
+                # A read timeout can happen after the calculator has already
+                # accepted the upload or created a portfolio.
+                retryable = method == "GET" or isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout))
+                if not retryable or attempt == self.retries:
                     raise CalculatorError(f"калькулятор недоступен: {exc}") from exc
         if r.status_code >= 400:
             raise CalculatorError(f"калькулятор ответил {r.status_code}: {r.text[:500]}")
@@ -78,6 +109,7 @@ class HttpPortfolioSession:
         if keep:
             body["keep"] = keep
         data = self._call("POST", f"{self.path}/valuations", body)
+        self._validate_portfolio_valuation(data, as_of, sets, body["scenarios"], only_ids is not None)
         return PortfolioValuation(
             as_of=data["as_of"],
             valued=data["valued"],
@@ -87,6 +119,32 @@ class HttpPortfolioSession:
             totals={s["name"]: s["npv"] for s in data["sets"]},
             deals={str(d["deal_id"]): DealValues(d["outstanding"], d["npv"]) for d in data["deals"]},
         )
+
+    @staticmethod
+    def _validate_portfolio_valuation(data: dict, as_of: str, sets: CurveSets,
+                                      scenarios: list[str], all_deal_sets: bool) -> None:
+        def valid_npv(row: dict) -> bool:
+            return set(row) == set(scenarios) and all(math.isfinite(value) for value in row.values())
+
+        try:
+            if data["as_of"] != as_of:
+                raise ValueError("не совпадает дата оценки")
+            if data["failed_total"]:
+                raise ValueError(f"не оценено сделок: {data['failed_total']}")
+            totals = data["sets"]
+            if [row["name"] for row in totals] != [name for name, _ in sets]:
+                raise ValueError("не совпадают наборы кривых")
+            if any(not valid_npv(row["npv"]) for row in totals):
+                raise ValueError("неполные или некорректные итоговые NPV")
+            expected_rows = len(sets) if all_deal_sets else 1
+            seen = set()
+            for row in data["deals"]:
+                ident = row["deal_id"]
+                if ident in seen or len(row["npv"]) != expected_rows or not all(map(valid_npv, row["npv"])):
+                    raise ValueError(f"некорректная оценка сделки {ident}")
+                seen.add(ident)
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise CalculatorError(f"калькулятор вернул неполную оценку на {as_of}: {exc}") from exc
 
     def movers(self, from_key: str, to_key: str, n: int) -> list[dict]:
         rows = self._call("GET", f"{self.path}/movers", params={"from": from_key, "to": to_key, "n": n})
@@ -163,7 +221,7 @@ class CashflowHttpCalculator:
             raise CalculatorError(f"калькулятор недоступен: {exc}") from exc
         if r.status_code != 200:
             raise CalculatorError(f"калькулятор ответил {r.status_code}: {r.text[:500]}")
-        data = r.json()
+        data = _validate_valuation_response(r.json(), scenarios)
         npv = {s["scenario"]: s["total"]["npv"] for s in data["scenarios"]}
         deal_npv: dict[str, dict[str, float]] = {}
         failed: dict[str, str] = {}

@@ -98,20 +98,3 @@ class RunRepository(Protocol):
     def list(self, limit: int = 50) -> list[dict[str, Any]]: ...
 
     def delete(self, run_id: str) -> bool: ...
-
-    def save_explanation(self, run_id: str, record: dict[str, Any]) -> dict[str, Any]: ...
-
-    def explanations(self, run_id: str) -> list[dict[str, Any]]: ...
-
-
-class Explainer(Protocol):
-    """LLM layer: turns verified facts into text. It never computes numbers."""
-
-    name: str
-    model: str | None
-
-    def explain(self, facts: dict[str, Any], question: str | None) -> dict[str, Any]:
-        """Returns {"headline": str, "blocks": [{"type", "text", "fact_ids", "chart", "metric", "tone"}],
-        "follow_ups": [str], "confidence": "high|medium|low"}; numbers appear only as {{F#}} placeholders."""
-
-    def available(self) -> bool: ...

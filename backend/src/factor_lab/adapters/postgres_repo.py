@@ -70,9 +70,6 @@ class PostgresRunRepository:
                     (run_id, p["date"], p["curve_date"] or None, p["deals"], p["npv_base"], p["ec"],
                      p["worst_scenario"], Jsonb(p["dnpv"])),
                 )
-            exp = result.get("explanation")
-            if exp and "answer" in exp:
-                self._insert_explanation(c, run_id, exp)
 
     def fail(self, run_id: str, error: str) -> None:
         with self.pool.connection() as c:
@@ -117,28 +114,3 @@ class PostgresRunRepository:
             item["periods"] = r[8] or []
             out.append(item)
         return out
-
-    def _insert_explanation(self, c, run_id: str, record: dict[str, Any]) -> str:
-        eid = str(uuid.uuid4())
-        c.execute(
-            "INSERT INTO explanations (id, run_id, question, provider, model, answer, verification, facts, note)"
-            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (eid, run_id, record.get("question"), record["provider"], record.get("model"),
-             Jsonb(_clean(record["answer"])), Jsonb(_clean(record["verification"])),
-             Jsonb(_clean(record.get("facts", []))), record.get("note")),
-        )
-        return eid
-
-    def save_explanation(self, run_id: str, record: dict[str, Any]) -> dict[str, Any]:
-        with self.pool.connection() as c:
-            eid = self._insert_explanation(c, run_id, record)
-        return {"id": eid, **record}
-
-    def explanations(self, run_id: str) -> list[dict[str, Any]]:
-        with self.pool.connection() as c:
-            rows = c.execute(
-                "SELECT id, created_at, question, provider, model, answer, verification, note, facts"
-                " FROM explanations WHERE run_id=%s ORDER BY created_at", (run_id,)).fetchall()
-        return [{"id": str(r[0]), "created_at": r[1].isoformat(), "question": r[2], "provider": r[3],
-                 "model": r[4], "answer": r[5], "verification": r[6], "note": r[7], "facts": r[8] or []}
-                for r in rows]

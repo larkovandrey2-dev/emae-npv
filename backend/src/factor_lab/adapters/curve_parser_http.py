@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import threading
 from datetime import date, timedelta
 
@@ -10,6 +11,7 @@ import httpx
 from ..domain.curves import Curve, CurvePoint, ScenarioCurves
 
 LOOKBACK_DAYS = 10
+REQUIRED_SCENARIOS = {"PARALLEL_UP", "PARALLEL_DOWN", "SHORT_UP", "SHORT_DOWN", "STEEPENER", "FLATTENER"}
 
 
 class CurveServiceError(RuntimeError):
@@ -58,13 +60,40 @@ class CurveParserClient:
 
     @staticmethod
     def _parse(payload: dict) -> ScenarioCurves:
-        tenors = sorted(payload["tenors"], key=lambda t: t["tenor_years"])
-        base = Curve(payload.get("date", ""), tuple(CurvePoint(t["tenor_years"], t["base_rate"]) for t in tenors))
-        shocked: dict[str, list[CurvePoint]] = {}
-        for t in tenors:
-            for s in t["scenarios"]:
-                shocked.setdefault(_scenario_name(s["scenario"]), []).append(CurvePoint(t["tenor_years"], s["rate"]))
-        return ScenarioCurves(base, {k: Curve(base.trade_date, tuple(v)) for k, v in shocked.items()})
+        try:
+            trade_date = date.fromisoformat(payload["date"])
+            tenors = payload["tenors"]
+            if not isinstance(tenors, list) or not tenors:
+                raise ValueError("tenor grid is empty")
+            tenors = sorted(tenors, key=lambda t: float(t["tenor_years"]))
+            raw_grid = [float(t["tenor_years"]) for t in tenors]
+            if any(not math.isfinite(x) or x <= 0 for x in raw_grid) or len(set(raw_grid)) != len(raw_grid):
+                raise ValueError("tenor grid must contain distinct positive values")
+            if len({max(1, round(t * 365)) for t in raw_grid}) != len(raw_grid):
+                raise ValueError("tenors collide after conversion to days")
+            base_points = tuple(CurvePoint(float(t["tenor_years"]), float(t["base_rate"])) for t in tenors)
+            if any(not math.isfinite(p.rate) for p in base_points):
+                raise ValueError("base curve contains a non-finite rate")
+            base = Curve(trade_date.isoformat(), base_points)
+            shocked: dict[str, list[CurvePoint]] = {}
+            for t in tenors:
+                names = set()
+                for s in t["scenarios"]:
+                    name = _scenario_name(s["scenario"])
+                    if name in names:
+                        raise ValueError(f"duplicate scenario {name} at tenor {t['tenor_years']}")
+                    names.add(name)
+                    rate = float(s["rate"])
+                    if not math.isfinite(rate):
+                        raise ValueError(f"scenario {name} contains a non-finite rate")
+                    shocked.setdefault(name, []).append(CurvePoint(float(t["tenor_years"]), rate))
+                if names != REQUIRED_SCENARIOS:
+                    raise ValueError(f"expected six scenarios at each tenor; got {sorted(names)}")
+            if set(shocked) != REQUIRED_SCENARIOS:
+                raise ValueError(f"expected six consistent stress scenarios; got {sorted(shocked)}")
+            return ScenarioCurves(base, {k: Curve(base.trade_date, tuple(v)) for k, v in shocked.items()})
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise CurveServiceError(f"invalid curve-parser payload: {exc}") from exc
 
     def snapshot(self, on_or_before: str) -> ScenarioCurves:
         with self._lock:
@@ -79,10 +108,17 @@ class CurveParserClient:
         if not found:
             raise CurveServiceError(f"нет кривой MOEX за {start}…{on_or_before}")
         trade = max(found)
+        try:
+            if not date.fromisoformat(start) <= date.fromisoformat(trade) <= end:
+                raise ValueError
+        except ValueError as exc:
+            raise CurveServiceError(f"curve-parser вернул неверную дату сделки: {trade}") from exc
         r = self._get(f"/api/v1/curves/{trade}")
         if r.status_code != 200:
             raise CurveServiceError(f"curve-parser /curves/{trade}: {r.status_code} {r.text[:300]}")
         curves = self._parse(r.json())
+        if curves.base.trade_date != trade:
+            raise CurveServiceError(f"curve-parser date {curves.base.trade_date} не совпадает с запрошенной {trade}")
         with self._lock:
             self._cache[on_or_before] = curves
         return curves

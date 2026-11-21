@@ -3,8 +3,6 @@
 import math
 from datetime import date
 
-from factor_lab.adapters.llm.template import TemplateExplainer
-from factor_lab.application.explanation import ExplainService
 from factor_lab.application.pipeline import RunPipeline, RunRequest
 from factor_lab.application.ports import DealValues, PortfolioValuation
 from factor_lab.domain.curves import BASE, Curve, CurvePoint, ScenarioCurves
@@ -126,7 +124,7 @@ class Calc:
 
 class Repo:
     def __init__(self):
-        self.runs, self.saved = {}, []
+        self.runs = {}
 
     def create(self, request):
         self.runs["r"] = {"status": "running"}
@@ -141,16 +139,10 @@ class Repo:
     def fail(self, run_id, error):
         self.runs[run_id] = {"status": "failed", "error": error}
 
-    def save_explanation(self, run_id, record):
-        self.saved.append(record)
-        return record
-
-
 def test_pipeline_end_to_end():
     repo = Repo()
-    t = TemplateExplainer()
     calc = Calc()
-    pipe = RunPipeline(Deals(), Curves(), calc, repo, ExplainService(t, t, repo), workers=2, panel_sample=12)
+    pipe = RunPipeline(Deals(), Curves(), calc, repo, workers=2, panel_sample=12)
     pipe.run("r", RunRequest(start="2022-08-31", end="2023-08-31"))
     run = repo.runs["r"]
     assert run["status"] == "done", run.get("error")
@@ -161,7 +153,6 @@ def test_pipeline_end_to_end():
         assert abs(m["residual"]) < 1e-6 * max(1, abs(m["change"]))
     assert len(res["steps"]) == 12
     assert res["factor_model"]["reliability"]["verdict"] in ("reliable", "unstable", "unreliable")
-    assert res["explanation"]["verification"]["status"] == "ok"
     assert calc.session.closed, "the calculator portfolio must be released"
     assert res["source"]["loaded"] == 12  # USD deal filtered out
     assert res["factor_model"]["sample"] == {"deals": 12, "of": 12}
@@ -172,9 +163,8 @@ def test_pipeline_end_to_end():
 
 def test_factor_model_uses_a_sample_of_large_portfolios():
     repo = Repo()
-    t = TemplateExplainer()
-    pipe = RunPipeline(Deals(), Curves(), Calc(), repo, ExplainService(t, t, repo), workers=1, panel_sample=5)
-    pipe.run("r", RunRequest(start="2022-08-31", end="2022-12-31", explain=False))
+    pipe = RunPipeline(Deals(), Curves(), Calc(), repo, workers=1, panel_sample=5)
+    pipe.run("r", RunRequest(start="2022-08-31", end="2022-12-31"))
     res = repo.runs["r"]["result"]
     assert res["factor_model"]["sample"] == {"deals": 5, "of": 12}
     assert any("выборке 5 сделок из 12" in x for x in res["limitations"])
@@ -184,15 +174,14 @@ def test_factor_model_uses_a_sample_of_large_portfolios():
 
 def test_runs_take_the_requested_source_and_prepayment():
     repo = Repo()
-    t = TemplateExplainer()
     calc = Calc()
 
     class Other(Deals):
         def describe(self):
             return "generated"
 
-    pipe = RunPipeline(Deals(), Curves(), calc, repo, ExplainService(t, t, repo), workers=1, panel_sample=12)
-    req = RunRequest(start="2022-08-31", end="2022-10-31", explain=False, dataset="d1",
+    pipe = RunPipeline(Deals(), Curves(), calc, repo, workers=1, panel_sample=12)
+    req = RunRequest(start="2022-08-31", end="2022-10-31", dataset="d1", prepayment=True,
                      prepayment_rates={"PREPAYMENT_AUTO": 0.3})
     pipe.run("r", req, Other())
     res = repo.runs["r"]["result"]

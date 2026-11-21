@@ -1,4 +1,4 @@
-"""Run orchestration: deals → curves → calculator → decomposition → factor model → explanation."""
+"""Run orchestration: deals → curves → calculator → decomposition → factor model."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ from ..domain.portfolio import DealRecord
 from .analytics.factor_model import PanelSpec, analyze_panel
 from .analytics.panel import FIELD_LABELS, TARGETS, build_panel
 from .decomposition import Decomposer, PeriodState
-from .explanation import ExplainService
 from .ports import Calculator, CurveService, DealSource, PortfolioSession, RunRepository
 
 log = logging.getLogger(__name__)
@@ -52,12 +51,11 @@ class RunRequest:
     frequency: str = "month"  # month | quarter
     dates: list[str] = field(default_factory=list)
     target: str = "dnpv_worst_per_rub"
-    explain: bool = True
     currency: str = "RUB"
     # generated portfolio to run on (None: the configured deal source)
     dataset: str | None = None
     # behavioural prepayment in the calculator; rates override the standard CPR per model code
-    prepayment: bool = True
+    prepayment: bool = False
     prepayment_rates: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -84,13 +82,12 @@ def month_ends(start: str, end: str, step: int) -> list[str]:
 
 class RunPipeline:
     def __init__(self, deals: DealSource, curves: CurveService, calculator: Calculator,
-                 repository: RunRepository, explainer: ExplainService, workers: int = 2,
+                 repository: RunRepository, workers: int = 2,
                  panel_sample: int = 5000):
         self.deals = deals
         self.curves = curves
         self.calculator = calculator
         self.repo = repository
-        self.explainer = explainer
         self.workers = workers
         self.panel_sample = panel_sample
 
@@ -179,6 +176,8 @@ class RunPipeline:
         up = self._upload(session, req.currency, step, source)
         if up.matched == 0:
             raise ValueError(f"в источнике нет сделок в валюте {req.currency}")
+        if up.accepted == 0:
+            raise ValueError("калькулятор отклонил все сделки портфеля")
         if len(up.report_dates) != 1:
             raise ValueError("сделки источника должны иметь одну дату среза")
         report_date = next(iter(up.report_dates))
@@ -192,6 +191,8 @@ class RunPipeline:
 
         step(f"Графики платежей и остатки {_n(up.accepted)} сделок на {len(dates)} дат", 0.26)
         sealed = session.seal(dates)
+        if not sealed["valid"]:
+            raise ValueError("не удалось построить график ни для одной сделки портфеля")
         excluded = list(up.rejected)
         excluded_total = up.rejected_total + sealed["failed_total"]
         for f in sealed["failures"]:
@@ -256,6 +257,11 @@ class RunPipeline:
 
         behaviour = sealed.get("behaviour") or {}
         reliability, limitations = self._reliability(decomposition, factor_model, steps, len(states), behaviour)
+        if excluded_total:
+            reason = f"Число отклонений при загрузке и расчёте графиков: {_n(excluded_total)}. Итоги относятся к принятым сделкам."
+            limitations.append(reason)
+            if reliability["confidence"] == "high":
+                reliability["confidence"] = "medium"
         if len(up.sample) < up.accepted:
             limitations.append(
                 f"Факторная модель обучена на случайной выборке {_n(len(up.sample))} сделок из {_n(up.accepted)}; "
@@ -275,12 +281,6 @@ class RunPipeline:
             "limitations": limitations,
             "scenarios": [s for s in periods[0]["npv"] if s != BASE],
         }
-        if req.explain:
-            step("Объяснение результатов (LLM)", 0.9)
-            try:
-                result["explanation"] = self.explainer.explain(run_id, result, None, persist=False)
-            except Exception as exc:
-                result["explanation"] = {"error": str(exc)}
         step("Готово", 1.0)
         return result
 

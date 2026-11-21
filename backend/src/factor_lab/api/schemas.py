@@ -12,10 +12,9 @@ class RunCreate(BaseModel):
     frequency: Literal["month", "quarter"] = "month"
     dates: list[date] = Field(default_factory=list, max_length=40)
     target: str = Field("dnpv_worst_per_rub", max_length=40, pattern=r"^[a-z_]+$")
-    explain: bool = True
     # generated portfolio id; absent or "default" — the configured deal source
     dataset: str | None = Field(None, max_length=40)
-    prepayment: bool = True
+    prepayment: bool = False
     prepayment_rates: dict[str, float] = Field(default_factory=dict)
 
     @field_validator("prepayment_rates")
@@ -38,7 +37,3 @@ class RunCreate(BaseModel):
 class DatasetCreate(BaseModel):
     name: str = Field("", max_length=120)
     params: dict[str, Any] = Field(default_factory=dict)
-
-
-class QuestionCreate(BaseModel):
-    question: str | None = Field(None, max_length=2000)

@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:16.6-bookworm
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: factor_lab
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d factor_lab"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  calculator:
+    image: factor-lab-cfcalc:c062ff2
+    build:
+      context: https://github.com/F14my/cashflow-rs.git#c062ff20074173e81c219b43fa117f0fdef32c6f
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8002:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+
+  factor-lab:
+    build:
+      context: .
+    environment:
+      DATABASE_URL: postgresql://app:app@db:5432/factor_lab
+      CALCULATOR_URL: http://calculator:8080
+      # Supply the real Team 2 endpoint in .env; its URL is not present in project metadata.
+      CURVES_URL: ${CURVES_URL:?Set CURVES_URL to the Team 2 curve-parser base URL}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - datasets:/data/datasets
+    depends_on:
+      db:
+        condition: service_healthy
+      calculator:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  datasets:
