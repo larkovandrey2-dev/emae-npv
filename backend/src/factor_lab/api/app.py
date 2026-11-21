@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
@@ -20,6 +21,14 @@ from ..container import Container, build
 from .schemas import QuestionCreate, RunCreate
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+log = logging.getLogger(__name__)
+
+
+def _warm(cont: Container) -> None:
+    try:
+        cont.deals.summary()
+    except Exception as exc:  # the endpoint will report the error when asked
+        log.warning("deal summary warm-up failed: %s", exc)
 
 
 def create_app(container: Container | None = None) -> FastAPI:
@@ -28,6 +37,8 @@ def create_app(container: Container | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.c = container or build(Settings.from_env())
+        # the portfolio profile is one pass over the source; warm it up off the request path
+        threading.Thread(target=_warm, args=(app.state.c,), daemon=True).start()
         yield
         runner.shutdown(wait=False, cancel_futures=True)
 
@@ -52,12 +63,7 @@ def create_app(container: Container | None = None) -> FastAPI:
     @app.get("/api/v1/deals")
     def deals():
         cont = c()
-        rows = cont.deals.load()
-        return {"source": cont.deals.describe(), "count": len(rows),
-                "report_dates": sorted({r.get("report_dttm", "")[:10] for r in rows}),
-                "deals": [{k: r.get(k) for k in ("deal_id", "currency_id", "discriminator", "rate_type_cd",
-                                                 "current_principal_amt", "interest_rate", "maturity_dttm", "product")}
-                          for r in rows]}
+        return {"source": cont.deals.describe(), **cont.deals.summary()}
 
     @app.get("/api/v1/targets")
     def targets():
@@ -74,7 +80,10 @@ def create_app(container: Container | None = None) -> FastAPI:
             target=body.target,
             explain=body.explain,
         )
-        report = sorted({r["report_dttm"][:10] for r in cont.deals.load()})[0]
+        report_dates = cont.deals.summary()["report_dates"]
+        if not report_dates:
+            raise HTTPException(422, detail="в источнике нет сделок")
+        report = report_dates[0]
         try:
             req_periods = cont.pipeline.periods(req, report)
         except ValueError as exc:

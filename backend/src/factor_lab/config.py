@@ -20,6 +20,7 @@ class Settings:
     llm_timeout_s: float
     codex_home: str | None
     workers: int
+    panel_sample: int
     migrations: Path
 
     @classmethod
@@ -39,6 +40,7 @@ class Settings:
             llm_effort=env("LLM_EFFORT") or None,
             llm_timeout_s=float(env("LLM_TIMEOUT_S", "180")),
             codex_home=env("CODEX_HOME") or None,
-            workers=int(env("WORKERS", "4")),
+            workers=int(env("WORKERS", "2")),
+            panel_sample=int(env("PANEL_SAMPLE", "5000")),
             migrations=Path(env("MIGRATIONS_DIR", str(ROOT / "migrations"))),
         )

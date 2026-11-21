@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 
-from ..application.ports import CalculatorResult
+from ..application.ports import CalculatorResult, CurveSets, DealValues, PortfolioValuation
 from ..domain.curves import Curve
 from ..domain.metrics import Valuation
 from ..domain.portfolio import DealRecord, ScheduledFlow
@@ -17,10 +17,89 @@ class CalculatorError(RuntimeError):
     pass
 
 
+def curves_payload(curves: dict[str, Curve]) -> list[dict]:
+    return [
+        {
+            "scenario": name,
+            "currency": "RUB",
+            "compounding": "annual",
+            "points": [
+                {"tenor_days": max(1, round(p.tenor_years * 365)), "zero_rate_percent": p.rate * 100}
+                for p in curve.points
+            ],
+        }
+        for name, curve in curves.items()
+    ]
+
+
+class HttpPortfolioSession:
+    """Portfolio held by cashflow-rs (`/api/v1/portfolios`): JSON batches in, totals out."""
+
+    def __init__(self, client: httpx.Client, base_url: str, indicators: list[dict], retries: int = 2):
+        self.client = client
+        self.base = base_url
+        self.retries = retries
+        created = self._call("POST", "/api/v1/portfolios", {"indicators": indicators})
+        self.id = created["id"]
+        self.path = f"/api/v1/portfolios/{self.id}"
+
+    def _call(self, method: str, path: str, body: dict | None = None, params: dict | None = None):
+        for attempt in range(self.retries + 1):
+            try:
+                r = self.client.request(method, f"{self.base}{path}", json=body, params=params)
+                break
+            except httpx.TransportError as exc:
+                if attempt == self.retries:
+                    raise CalculatorError(f"калькулятор недоступен: {exc}") from exc
+        if r.status_code >= 400:
+            raise CalculatorError(f"калькулятор ответил {r.status_code}: {r.text[:500]}")
+        return r.json() if r.content else None
+
+    def upload(self, deals: list[DealRecord], currency: str) -> dict:
+        return self._call("POST", f"{self.path}/deals", {"deals": deals, "currency": currency})
+
+    def seal(self, dates: list[str]) -> dict:
+        return self._call("POST", f"{self.path}/seal", {"dates": dates})
+
+    def value(self, as_of: str, sets: CurveSets, sample_ids: list[str] | None = None,
+              only_ids: list[str] | None = None, keep: str | None = None) -> PortfolioValuation:
+        body: dict = {
+            "as_of": as_of,
+            "curve_sets": [{"name": name, "curves": curves_payload(c)} for name, c in sets],
+            "scenarios": list(sets[0][1]),
+            "sample_ids": [int(i) for i in sample_ids or []],
+        }
+        if only_ids is not None:
+            body["only_ids"] = [int(i) for i in only_ids]
+        if keep:
+            body["keep"] = keep
+        data = self._call("POST", f"{self.path}/valuations", body)
+        return PortfolioValuation(
+            as_of=data["as_of"],
+            valued=data["valued"],
+            matured=data["matured"],
+            failed_total=data["failed_total"],
+            failures={str(f["deal_id"]): f["error"] for f in data["failures"]},
+            totals={s["name"]: s["npv"] for s in data["sets"]},
+            deals={str(d["deal_id"]): DealValues(d["outstanding"], d["npv"]) for d in data["deals"]},
+        )
+
+    def movers(self, from_key: str, to_key: str, n: int) -> list[dict]:
+        rows = self._call("GET", f"{self.path}/movers", params={"from": from_key, "to": to_key, "n": n})
+        return [{**r, "deal_id": str(r["deal_id"])} for r in rows]
+
+    def close(self) -> None:
+        try:
+            self.client.delete(f"{self.base}{self.path}", timeout=10)
+        except httpx.HTTPError:
+            pass
+
+
 class CashflowHttpCalculator:
-    def __init__(self, base_url: str, timeout_s: float = 120, indicators_csv: str | None = None):
+    def __init__(self, base_url: str, timeout_s: float = 900, indicators_csv: str | None = None):
         self.base_url = base_url.rstrip("/")
-        self.client = httpx.Client(timeout=timeout_s)
+        # several upload batches go out at once; keep enough pooled connections for them
+        self.client = httpx.Client(timeout=timeout_s, limits=httpx.Limits(max_connections=16))
         self.indicators = self._load_indicators(indicators_csv) if indicators_csv else []
 
     @staticmethod
@@ -35,6 +114,9 @@ class CashflowHttpCalculator:
                 series.setdefault(row["code"], []).append(
                     {"effective_date": row["effective_date"], "rate_percent": float(row["rate_percent"])})
         return [{"code": c, "points": pts} for c, pts in series.items()]
+
+    def open_portfolio(self) -> HttpPortfolioSession:
+        return HttpPortfolioSession(self.client, self.base_url, self.indicators)
 
     def health(self) -> bool:
         try:

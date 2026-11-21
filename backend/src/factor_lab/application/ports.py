@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Iterator
 from typing import Any, Protocol
 
 from ..domain.curves import Curve, ScenarioCurves
@@ -11,7 +12,11 @@ from ..domain.portfolio import DealRecord, ScheduledFlow
 
 
 class DealSource(Protocol):
-    def load(self) -> list[DealRecord]: ...
+    def batches(self, size: int) -> Iterator[list[DealRecord]]:
+        """Deals in source order, `size` at a time; empty fields are left out."""
+
+    def summary(self) -> dict[str, Any]:
+        """Portfolio profile for the UI: counts, report dates, RUB aggregates, largest deals."""
 
     def describe(self) -> str: ...
 
@@ -32,14 +37,48 @@ class CalculatorResult:
     schedules: dict[str, list[ScheduledFlow]] = field(default_factory=dict)
 
 
+@dataclass
+class DealValues:
+    outstanding: float
+    npv: list[dict[str, float]]  # one {scenario: npv} per requested curve set
+
+
+@dataclass
+class PortfolioValuation:
+    """Totals of one valuation request; per-deal values only for the deals asked for."""
+
+    as_of: str
+    valued: int
+    matured: int
+    failed_total: int
+    failures: dict[str, str]
+    totals: dict[str, dict[str, float]]  # curve set name -> {scenario: npv}
+    deals: dict[str, DealValues] = field(default_factory=dict)
+
+
+CurveSets = list[tuple[str, dict[str, Curve]]]
+
+
+class PortfolioSession(Protocol):
+    """A portfolio held by the calculator: uploaded once, valued many times."""
+
+    def upload(self, deals: list[DealRecord], currency: str) -> dict[str, Any]: ...
+
+    def seal(self, dates: list[str]) -> dict[str, Any]:
+        """Builds base schedules and balances on `dates`; returns valid/failed counts."""
+
+    def value(self, as_of: str, sets: CurveSets, sample_ids: list[str] | None = None,
+              only_ids: list[str] | None = None, keep: str | None = None) -> PortfolioValuation:
+        """Rolls deals to `as_of` and values them under every curve set."""
+
+    def movers(self, from_key: str, to_key: str, n: int) -> list[dict[str, Any]]:
+        """Deals with the largest base NPV change between two kept valuations."""
+
+    def close(self) -> None: ...
+
+
 class Calculator(Protocol):
-    def value(
-        self,
-        deals: list[DealRecord],
-        curves: dict[str, Curve],
-        report_date: str,
-        include_cashflows: bool = False,
-    ) -> CalculatorResult: ...
+    def open_portfolio(self) -> PortfolioSession: ...
 
     def health(self) -> bool: ...
 

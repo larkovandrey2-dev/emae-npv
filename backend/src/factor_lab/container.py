@@ -39,5 +39,5 @@ def build(settings: Settings) -> Container:
         else template
     )
     explain = ExplainService(primary, template, repo)
-    pipeline = RunPipeline(deals, curves, calculator, repo, explain, settings.workers)
+    pipeline = RunPipeline(deals, curves, calculator, repo, explain, settings.workers, settings.panel_sample)
     return Container(settings, repo, calculator, curves, deals, explain, pipeline, primary)
