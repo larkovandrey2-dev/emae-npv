@@ -29,7 +29,7 @@ class Settings:
         env = os.environ.get
         provider = env("LLM_PROVIDER", "codex").strip().lower()
         if provider not in ("codex", "template"):
-            raise ValueError(f"LLM_PROVIDER={provider!r}: ожидается codex или template")
+            raise ValueError(f"LLM_PROVIDER={provider!r}: expected codex or template")
         return cls(
             database_url=env("DATABASE_URL", "postgresql://app:app@localhost:5433/factor_lab"),
             calculator_url=env("CALCULATOR_URL", "http://localhost:8002"),

@@ -59,9 +59,9 @@ class DatasetService:
             return self.default
         record = self.repo.get(dataset_id)
         if not record:
-            raise LookupError(f"набор сделок {dataset_id} не найден")
+            raise LookupError(f"dataset {dataset_id} not found")
         if record["status"] != "done":
-            raise ValueError(f"набор сделок «{record['name']}» ещё не готов")
+            raise ValueError(f"dataset {record['name']} is not ready yet")
         with self._lock:
             if dataset_id not in self._sources:
                 self._sources[dataset_id] = self.file_source(record["path"])

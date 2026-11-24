@@ -27,10 +27,10 @@ from .ports import CurveService, DealValues, PortfolioSession
 ROLL = "portfolio_roll"
 FACTORS = [ROLL, *CURVE_BUCKETS]
 FACTOR_LABELS = {
-    ROLL: "Течение времени и амортизация портфеля (погашения, новые фиксации ставки)",
-    "curve_short": "Короткий участок кривой (до 1 года)",
-    "curve_medium": "Средний участок кривой (1–5 лет)",
-    "curve_long": "Длинный участок кривой (свыше 5 лет)",
+    ROLL: "Roll-down",
+    "curve_short": "Curve <1Y",
+    "curve_medium": "Curve 1–5Y",
+    "curve_long": "Curve >5Y",
 }
 COALITIONS = [frozenset(c) for k in range(len(FACTORS) + 1) for c in combinations(FACTORS, k)]
 EMPTY, FULL = frozenset(), frozenset(FACTORS)

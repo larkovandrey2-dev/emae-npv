@@ -47,7 +47,7 @@ class ExplainService:
             answer = self.primary.explain(facts, question)
         except Exception as exc:
             log.warning("explainer_failed provider=%s: %s", self.primary.name, exc)
-            note = f"языковая модель недоступна ({exc}); ответ собран по шаблону"
+            note = f"LLM unavailable ({exc}); template answer"
             provider, model = self.fallback.name, self.fallback.model
             answer = self.fallback.explain(facts, question)
         verification = verify_text(answer_texts(answer, facts["facts"]), facts["facts"])

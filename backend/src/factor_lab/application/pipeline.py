@@ -102,11 +102,11 @@ class RunPipeline:
             end = req.end or f"{int(start[:4]) + 1}{start[4:]}".replace("-02-29", "-02-28")
             dates = month_ends(start, end, 3 if req.frequency == "quarter" else 1)
         if len(dates) < 2:
-            raise ValueError("нужно минимум два отчётных периода")
+            raise ValueError("at least two report dates are required")
         if len(dates) > 40:
-            raise ValueError("не больше 40 отчётных периодов за прогон")
+            raise ValueError("at most 40 report dates per run")
         if dates[0] < report_date:
-            raise ValueError(f"периоды должны начинаться не раньше даты среза сделок {report_date}")
+            raise ValueError(f"dates must not be earlier than the deals report date {report_date}")
         return dates
 
     def run(self, run_id: str, req: RunRequest, source: DealSource | None = None) -> None:
@@ -166,7 +166,7 @@ class RunPipeline:
                 in_flight.append(pool.submit(session.upload, mine, currency))
                 while len(in_flight) >= UPLOAD_PARALLEL * 2:
                     settle(in_flight.popleft())
-                step(f"Загрузка сделок в калькулятор: {_n(up.matched)} из прочитанных {_n(up.rows)}",
+                step(f"Loading deals: {_n(up.matched)} of {_n(up.rows)}",
                      0.02 + min(0.08, 0.08 * up.rows / max(up.rows + 1, 2_500_000)))
             while in_flight:
                 settle(in_flight.popleft())
@@ -175,22 +175,22 @@ class RunPipeline:
 
     def _run_in(self, session: PortfolioSession, run_id: str, req: RunRequest, step,
                 source: DealSource) -> dict[str, Any]:
-        step("Загрузка сделок в калькулятор", 0.02)
+        step("Loading deals", 0.02)
         up = self._upload(session, req.currency, step, source)
         if up.matched == 0:
-            raise ValueError(f"в источнике нет сделок в валюте {req.currency}")
+            raise ValueError(f"no {req.currency} deals in the source")
         if len(up.report_dates) != 1:
-            raise ValueError("сделки источника должны иметь одну дату среза")
+            raise ValueError("source deals must share one report date")
         report_date = next(iter(up.report_dates))
         dates = self.periods(req, report_date)
 
-        step("Запрос кривых и стресс-сценариев в curve-parser", 0.1)
+        step("Fetching curves", 0.1)
         snapshots = {}
         for i, d in enumerate(dates):
             snapshots[d] = self.curves.snapshot(d)
-            step(f"Кривая на {d}: торговый день {snapshots[d].base.trade_date}", 0.1 + 0.15 * (i + 1) / len(dates))
+            step(f"Curve {d}: trade date {snapshots[d].base.trade_date}", 0.1 + 0.15 * (i + 1) / len(dates))
 
-        step(f"Графики платежей и остатки {_n(up.accepted)} сделок на {len(dates)} дат", 0.26)
+        step(f"Cash flows: {_n(up.accepted)} deals × {len(dates)} dates", 0.26)
         sealed = session.seal(dates)
         excluded = list(up.rejected)
         excluded_total = up.rejected_total + sealed["failed_total"]
@@ -209,7 +209,7 @@ class RunPipeline:
             for k, msg in v.failures.items():
                 if len(excluded) < MAX_EXCLUDED:
                     excluded.append({"deal_id": k, "reason": f"{d}: {msg}"})
-            step(f"NPV на {d}: {_n(v.valued)} сделок, 7 сценариев", 0.3 + 0.18 * (i + 1) / len(dates))
+            step(f"NPV {d}: {_n(v.valued)} deals × 7 scenarios", 0.3 + 0.18 * (i + 1) / len(dates))
 
         periods = []
         for s in states:
@@ -227,13 +227,13 @@ class RunPipeline:
                 "curve_features": s.curves.base.features(),
             })
 
-        step("Точное разложение изменения ЭКпрбк и NPV (Шепли по калькулятору)", 0.5)
+        step("Shapley attribution", 0.5)
         last = len(states) - 1
         pairs = [(0, last)] + [(i - 1, i) for i in range(1, len(states)) if (i - 1, i) != (0, last)]
         decomposer = Decomposer(session, self.curves, self.workers)
         results = decomposer.decompose_pairs(
             states, pairs, ["ec", "npv_base"],
-            progress=lambda k, n: step(f"Разложение: коалиции на {k} из {n} дат", 0.5 + 0.2 * k / n),
+            progress=lambda k, n: step(f"Attribution: {k} of {n} dates", 0.5 + 0.2 * k / n),
         )
         by_pair = dict(zip(pairs, results))
         decomposition = by_pair[(0, last)]
@@ -247,7 +247,7 @@ class RunPipeline:
                    for m in ("ec", "npv_base")},
             })
 
-        step(f"Факторная модель на выборке {_n(len(up.sample))} сделок", 0.72)
+        step(f"Factor model on {_n(len(up.sample))} deals", 0.72)
         panel = build_panel([(s.report_date, self._sample_deals(up.sample, s), s.valuation, s.curves.base.features())
                              for s in states])
         target = req.target if req.target in TARGETS or req.target.startswith("dnpv_") else "dnpv_worst_per_rub"
@@ -258,8 +258,8 @@ class RunPipeline:
         reliability, limitations = self._reliability(decomposition, factor_model, steps, len(states), behaviour)
         if len(up.sample) < up.accepted:
             limitations.append(
-                f"Факторная модель обучена на случайной выборке {_n(len(up.sample))} сделок из {_n(up.accepted)}; "
-                "итоги, разложение и топ сделок посчитаны по всему портфелю.")
+                f"The factor model is trained on a random sample of {_n(len(up.sample))} of {_n(up.accepted)} deals; "
+                "totals, attribution and top deals use the full book.")
         result: dict[str, Any] = {
             "request": req.to_dict(),
             "source": {"deals": source.describe(), "dataset": req.dataset, "report_date": report_date,
@@ -276,12 +276,12 @@ class RunPipeline:
             "scenarios": [s for s in periods[0]["npv"] if s != BASE],
         }
         if req.explain:
-            step("Объяснение результатов (LLM)", 0.9)
+            step("LLM summary", 0.9)
             try:
                 result["explanation"] = self.explainer.explain(run_id, result, None, persist=False)
             except Exception as exc:
                 result["explanation"] = {"error": str(exc)}
-        step("Готово", 1.0)
+        step("Done", 1.0)
         return result
 
     @staticmethod
@@ -307,7 +307,7 @@ class RunPipeline:
         reasons, limitations = [], []
         ec = dec["metrics"]["ec"]
         if abs(ec["change"]) > 0 and abs(ec["residual"]) > 0.01 * abs(ec["change"]):
-            reasons.append("разложение ЭКпрбк не сходится с наблюдаемым изменением")
+            reasons.append("EC attribution does not add up to the observed change")
         signs = {}
         for s in steps:
             for f, v in s["ec"].items():
@@ -315,30 +315,30 @@ class RunPipeline:
                     signs.setdefault(f, set()).add(v > 0)
         flip = [f for f, s in signs.items() if len(s) > 1]
         if flip:
-            limitations.append("знак вклада меняется между соседними периодами для: " + ", ".join(flip))
+            limitations.append("Contribution sign flips between adjacent dates for: " + ", ".join(flip))
         verdict = model.get("reliability", {}).get("verdict", "insufficient")
         if verdict != "reliable":
             reasons.extend(model.get("reliability", {}).get("reasons", []))
         limitations += [
-            "Вклады групп факторов точны для пары дат (разложение пересчитывает калькулятор), "
-            "но глобальная важность и формы зависимостей — оценка суррогатной модели.",
+            "Factor contributions are exact for each pair of dates (the calculator reprices them); "
+            "global importance and response shapes are surrogate-model estimates.",
         ]
         prepay = (behaviour or {}).get("prepayment") or {}
         if prepay.get("enabled") and prepay.get("deals"):
             deals = _n(prepay["deals"])
             limitations.append(
-                f"Досрочные погашения учтены для {deals} сделок с моделью поведения: постоянная "
-                "годовая ставка CPR по коду модели, одинаковая во всех сценариях; новые выдачи не моделируются.")
+                f"Prepayment applied to {deals} deals with a behaviour model: a constant annual CPR per model code, "
+                "the same in every scenario; new business is not modelled.")
             if prepay.get("unknown_models"):
-                limitations.append("Коды моделей без ставки CPR (сделки идут по договорному графику): "
+                limitations.append("Model codes without a CPR (deals follow the contract schedule): "
                                    + ", ".join(sorted(prepay["unknown_models"])))
         else:
-            limitations.append("Сделки двигаются во времени по договорному графику: без новых выдач и "
-                               "досрочных погашений.")
+            limitations.append("Deals follow the contract schedule: no new business, "
+                               "no prepayment.")
         if n_periods < 6:
-            limitations.append("Периодов меньше шести — выводы об устойчивости во времени предварительные.")
+            limitations.append("Fewer than six dates: stability over time is preliminary.")
         if ec["linear_baseline"]["unexplained_share"] and abs(ec["linear_baseline"]["unexplained_share"]) > 0.1:
-            limitations.append("Изолированные эффекты не складываются в изменение ЭКпрбк: заметна нелинейность "
-                               "(минимум по сценариям, выпуклость) или взаимодействие факторов.")
+            limitations.append("Isolated effects do not add up to the EC change: nonlinearity "
+                               "(scenario minimum, convexity) or factor interactions.")
         level = "high" if not reasons and not flip else ("medium" if len(reasons) <= 1 else "low")
         return {"confidence": level, "reasons": reasons, "factor_model": verdict}, limitations

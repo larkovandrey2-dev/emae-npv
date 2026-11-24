@@ -54,9 +54,9 @@ class HttpPortfolioSession:
                 break
             except httpx.TransportError as exc:
                 if attempt == self.retries:
-                    raise CalculatorError(f"калькулятор недоступен: {exc}") from exc
+                    raise CalculatorError(f"calculator unavailable: {exc}") from exc
         if r.status_code >= 400:
-            raise CalculatorError(f"калькулятор ответил {r.status_code}: {r.text[:500]}")
+            raise CalculatorError(f"calculator returned {r.status_code}: {r.text[:500]}")
         return r.json() if r.content else None
 
     def upload(self, deals: list[DealRecord], currency: str) -> dict:
@@ -160,9 +160,9 @@ class CashflowHttpCalculator:
         try:
             r = self.client.post(f"{self.base_url}/api/v1/valuations", json=body)
         except httpx.HTTPError as exc:
-            raise CalculatorError(f"калькулятор недоступен: {exc}") from exc
+            raise CalculatorError(f"calculator unavailable: {exc}") from exc
         if r.status_code != 200:
-            raise CalculatorError(f"калькулятор ответил {r.status_code}: {r.text[:500]}")
+            raise CalculatorError(f"calculator returned {r.status_code}: {r.text[:500]}")
         data = r.json()
         npv = {s["scenario"]: s["total"]["npv"] for s in data["scenarios"]}
         deal_npv: dict[str, dict[str, float]] = {}

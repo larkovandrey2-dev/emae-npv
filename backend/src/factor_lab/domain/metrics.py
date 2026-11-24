@@ -25,7 +25,7 @@ class Valuation:
 
     @property
     def ec(self) -> float:
-        """ЭКпрбк proxy: the minimum ΔNPV over all stress scenarios (negative is a loss)."""
+        """EC proxy: the minimum ΔNPV over all stress scenarios (negative is a loss)."""
         return min(self.dnpv().values())
 
     @property
@@ -48,6 +48,6 @@ class Valuation:
 
 
 METRICS = {
-    "npv_base": "NPV портфеля в базовом сценарии",
-    "ec": "ЭКпрбк: минимум ΔNPV по стресс-сценариям",
+    "npv_base": "Base NPV",
+    "ec": "EC: minimum ΔNPV over stress scenarios",
 }

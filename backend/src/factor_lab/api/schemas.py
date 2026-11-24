@@ -23,7 +23,7 @@ class RunCreate(BaseModel):
     def cpr_range(cls, v):
         for code, cpr in v.items():
             if not 0 <= cpr < 1:
-                raise ValueError(f"CPR для {code} должен быть в [0; 1)")
+                raise ValueError(f"CPR for {code} must be in [0, 1)")
         return v
 
     @field_validator("end")

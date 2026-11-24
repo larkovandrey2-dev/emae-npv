@@ -27,7 +27,7 @@ def _rows(lines: Iterable[str]) -> Iterator[DealRecord]:
     """Parses `;` CSV lines; drops empty fields so batches stay small on the wire."""
     reader = csv.DictReader(lines, delimiter=";")
     if not reader.fieldnames or "deal_id" not in [f.lstrip("﻿") for f in reader.fieldnames]:
-        raise ValueError("источник сделок вернул CSV без колонки deal_id")
+        raise ValueError("deal source returned a CSV without deal_id")
     reader.fieldnames = [f.lstrip("﻿").strip() for f in reader.fieldnames]
     for row in reader:
         yield {k: v.strip() for k, v in row.items() if k and v and v.strip()}

@@ -6,13 +6,13 @@ import re
 from typing import Any
 
 NUMBER = re.compile(
-    r"(?<![\w\[])([-−–]?\d{1,3}(?:[   ]\d{3})+(?:[.,]\d+)?|[-−–]?\d+(?:[.,]\d+)?)"
-    r"\s*(млрд|млн|тыс\.?|%|п\.\s?п\.|б\.\s?п\.|bp)?",
+    r"(?<![\w\[])₽?([-−–]?\d{1,3}(?:,\d{3})+(?:\.\d+)?|[-−–]?\d+(?:\.\d+)?)"
+    r"\s*(bn|b|m|k|%|pp|bp)?(?![a-z])",
     re.IGNORECASE,
 )
 DATE = re.compile(r"\d{4}-\d{2}-\d{2}|\d{2}\.\d{2}\.\d{4}")
 FACT_REF = re.compile(r"\[?F\d+\]?")
-MULT = {"млрд": 1e9, "млн": 1e6, "тыс": 1e3, "тыс.": 1e3}
+MULT = {"bn": 1e9, "b": 1e9, "m": 1e6, "k": 1e3}
 
 
 def _candidates(fact: dict[str, Any]) -> list[float]:
@@ -36,14 +36,10 @@ def _candidates(fact: dict[str, Any]) -> list[float]:
 
 def _parse(raw: str, suffix: str | None) -> tuple[float, float]:
     text = raw.replace("−", "-").replace("–", "-")
-    for sp in (" ", " ", " "):
-        text = text.replace(sp, "")
-    text = text.replace(",", ".")
+    text = text.replace(",", "")
     value = float(text)
     decimals = len(text.split(".")[1]) if "." in text else 0
     mult = MULT.get((suffix or "").lower().rstrip(), 1.0)
-    if (suffix or "").lower().startswith("б"):
-        mult = 1.0
     precision = 0.5 * 10 ** (-decimals) * mult
     return value * mult, precision
 

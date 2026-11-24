@@ -51,12 +51,12 @@ class CodexExplainer:
                 kwargs["effort"] = self.effort
             result = thread.run(prompt, **kwargs)
             if result.final_response is None:
-                raise RuntimeError(f"языковая модель не вернула ответ: {result.status}")
+                raise RuntimeError(f"LLM returned no answer: {result.status}")
             return result.final_response
 
     def explain(self, facts: dict[str, Any], question: str | None) -> dict[str, Any]:
         if not self.available():
-            raise RuntimeError("нет авторизации языковой модели")
+            raise RuntimeError("LLM is not authorised")
         box: dict[str, Any] = {}
 
         def target():
@@ -70,7 +70,7 @@ class CodexExplainer:
         worker.start()
         worker.join(self.timeout_s)
         if worker.is_alive():
-            raise TimeoutError(f"языковая модель не ответила за {self.timeout_s:.0f} с")
+            raise TimeoutError(f"LLM timed out after {self.timeout_s:.0f}s")
         if "error" in box:
             raise box["error"]
         text = box["text"].strip()
@@ -79,5 +79,5 @@ class CodexExplainer:
         answer = json.loads(text)
         for key in ("headline", "blocks", "follow_ups", "confidence"):
             if key not in answer:
-                raise ValueError(f"ответ модели без поля {key}")
+                raise ValueError(f"LLM answer has no {key} field")
         return answer

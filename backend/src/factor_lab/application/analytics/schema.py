@@ -62,14 +62,14 @@ def infer_schema(
         present = [v for v in values if not _missing(v)]
         missing_share = 1 - len(present) / len(values)
         if missing_share > MAX_MISSING:
-            dropped.append({"column": col, "reason": f"пропуски {missing_share:.0%}"})
+            dropped.append({"column": col, "reason": f"{missing_share:.0%} missing"})
             continue
         distinct = {str(v) for v in present}
         if len(distinct) <= 1:
-            dropped.append({"column": col, "reason": "константа"})
+            dropped.append({"column": col, "reason": "constant"})
             continue
         if col.endswith("_id") or col == "id":
-            dropped.append({"column": col, "reason": "идентификатор"})
+            dropped.append({"column": col, "reason": "identifier"})
             continue
         if all(isinstance(v, str) and DATE_RE.match(v) for v in present):
             features.append(Feature(f"{col}__years", "numeric", col, "years_from_observation"))
@@ -79,7 +79,7 @@ def infer_schema(
             features.append(Feature(col, "numeric", col, "identity"))
             continue
         if len(distinct) > MAX_LEVELS:
-            dropped.append({"column": col, "reason": f"{len(distinct)} категорий — слишком много"})
+            dropped.append({"column": col, "reason": f"too many categories ({len(distinct)})"})
             continue
         features.append(Feature(col, "categorical", col, "category"))
     return features, dropped

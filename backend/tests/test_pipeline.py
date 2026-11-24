@@ -177,7 +177,7 @@ def test_factor_model_uses_a_sample_of_large_portfolios():
     pipe.run("r", RunRequest(start="2022-08-31", end="2022-12-31", explain=False))
     res = repo.runs["r"]["result"]
     assert res["factor_model"]["sample"] == {"deals": 5, "of": 12}
-    assert any("выборке 5 сделок из 12" in x for x in res["limitations"])
+    assert any("sample of 5 of 12 deals" in x for x in res["limitations"])
     # totals still cover the whole portfolio
     assert res["periods"][0]["deals"] == 12
 
@@ -199,4 +199,4 @@ def test_runs_take_the_requested_source_and_prepayment():
     assert res["source"]["deals"] == "generated" and res["source"]["dataset"] == "d1"
     assert calc.prepayment == {"enabled": True, "rates": {"PREPAYMENT_AUTO": 0.3}}
     assert res["behaviour"]["prepayment"]["deals"] == 3
-    assert any("Досрочные погашения учтены для 3 сделок" in x for x in res["limitations"])
+    assert any("Prepayment applied to 3 deals" in x for x in res["limitations"])

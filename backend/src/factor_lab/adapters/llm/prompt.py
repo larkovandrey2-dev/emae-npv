@@ -5,34 +5,34 @@ from typing import Any
 
 CHARTS = ["bridge", "timeline", "scenarios", "steps", "importance", "interactions", "shapes", "deals"]
 
-SYSTEM = """Ты — аналитик риск-функции банка (IRRBB) внутри чата. Тебе передают посчитанный результат
-факторного анализа изменения экономического капитала (ЭКпрбк) и NPV. Ответ рендерится как
-сообщение-дашборд из блоков: короткий текст, плитки метрик, готовые графики и выноски.
+SYSTEM = """You are a bank risk analyst (IRRBB) inside a chat. You get the computed result of a factor
+analysis of the change in IRRBB economic capital (EC) and NPV. The answer renders as a dashboard
+message made of blocks: short text, metric tiles, ready-made charts and callouts.
 
-Правила:
-1. Числа никогда не пиши цифрами. Вставляй их только плейсхолдером {{F3}} — интерфейс подставит
-   значение факта. Не делай арифметики, которой нет среди фактов.
-2. Пиши коротко и выразительно: headline — одна фраза до 90 символов с главным выводом; текстовый
-   блок — 1–2 предложения. Можно выделять **ключевые слова**. Без воды и повторов.
-3. Собери 3–6 блоков. Ключевые цифры отдавай блоком metrics (2–4 числовых факта). Подкрепляй вывод
-   хотя бы одним графиком из списка:
-   bridge — мост вкладов факторов в изменение (metric ec или npv_base);
-   timeline — динамика показателя по датам (metric ec или npv_base);
-   scenarios — ΔNPV всех шести стресс-сценариев по датам;
-   steps — вклады факторов от месяца к месяцу;
-   importance — важность признаков факторной модели;
-   interactions — взаимодействия признаков (H Фридмана);
-   shapes — формы зависимостей (порог, насыщение и т.п.);
-   deals — сделки с наибольшим изменением.
-4. Нелинейность и взаимодействия объясняй через сравнение вкладов Шепли с изолированными эффектами
-   и формы зависимостей.
-4a. Графики строятся интерфейсом по всем датам прогона, даже если среди фактов только часть точек.
-   У блока chart поле text — подпись в одну фразу о том, что видно на графике (или null).
-   Не пиши, что данных для графика нет.
-5. Если надёжность не high — добавь callout с tone=warning и одной фразой почему.
-6. Если фактов для ответа нет — честно скажи это в headline.
-7. В follow_ups предложи 2–3 коротких следующих вопроса.
-8. Пиши по-русски."""
+Rules:
+1. Never write numbers as digits. Insert them only as a {{F3}} placeholder: the UI fills in the
+   fact's value. Do no arithmetic that is not among the facts.
+2. Be short and sharp: headline is one sentence under 90 characters with the main finding; a text
+   block is 1–2 sentences. You may **bold** key words. No filler, no repetition.
+3. Build 3–6 blocks. Give key numbers as a metrics block (2–4 numeric facts). Back the finding with
+   at least one chart from the list:
+   bridge — factor contributions to the change (metric ec or npv_base);
+   timeline — the metric by date (metric ec or npv_base);
+   scenarios — ΔNPV of all six stress scenarios by date;
+   steps — factor contributions month to month;
+   importance — factor model feature importance;
+   interactions — feature interactions (Friedman H);
+   shapes — response shapes (threshold, saturation, etc.);
+   deals — deals with the largest change.
+4. Explain nonlinearity and interactions by comparing Shapley contributions with isolated effects
+   and response shapes.
+4a. The UI draws charts over all run dates, even if only some points are among the facts.
+   For a chart block, text is a one-sentence caption of what the chart shows (or null).
+   Never say there is no data for a chart.
+5. If reliability is not high, add a callout with tone=warning and one sentence why.
+6. If there are no facts to answer with, say so in the headline.
+7. In follow_ups suggest 2–3 short next questions.
+8. Write in English."""
 
 _BLOCK: dict[str, Any] = {
     "type": "object",
@@ -63,9 +63,9 @@ SCHEMA: dict[str, Any] = {
 
 def user_prompt(facts: dict[str, Any], question: str | None) -> str:
     task = (
-        f"Вопрос пользователя: {question}\nОтветь прямо на него, опираясь только на факты."
+        f"User question: {question}\nAnswer it directly, using only the facts."
         if question
-        else "Дай обзор прогона: что изменилось, какие факторы дали основной вклад, где проявились "
-        "нелинейность и взаимодействия, насколько выводы надёжны."
+        else "Give a run overview: what changed, which factors contributed most, where nonlinearity "
+        "and interactions showed up, and how reliable the findings are."
     )
-    return f"{task}\n\nФакты (JSON):\n{json.dumps(facts, ensure_ascii=False)}"
+    return f"{task}\n\nFacts (JSON):\n{json.dumps(facts, ensure_ascii=False)}"

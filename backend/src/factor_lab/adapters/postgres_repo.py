@@ -50,7 +50,7 @@ class PostgresRunRepository:
     def create(self, request: dict[str, Any]) -> str:
         rid = str(uuid.uuid4())
         with self.pool.connection() as c:
-            c.execute("INSERT INTO runs (id, status, stage, progress, request) VALUES (%s,'running','В очереди',0,%s)",
+            c.execute("INSERT INTO runs (id, status, stage, progress, request) VALUES (%s,'running','Queued',0,%s)",
                       (rid, Jsonb(_clean(request))))
         return rid
 
@@ -61,7 +61,7 @@ class PostgresRunRepository:
     def complete(self, run_id: str, result: dict[str, Any]) -> None:
         result = _clean(result)
         with self.pool.connection() as c, c.transaction():
-            c.execute("UPDATE runs SET status='done', stage='Готово', progress=1, result=%s, updated_at=now() WHERE id=%s",
+            c.execute("UPDATE runs SET status='done', stage='Done', progress=1, result=%s, updated_at=now() WHERE id=%s",
                       (Jsonb(result), run_id))
             for p in result["periods"]:
                 c.execute(

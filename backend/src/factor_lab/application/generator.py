@@ -73,11 +73,11 @@ class GeneratorParams:
     seed: int = 42
     currency: dict[str, float] = field(default_factory=lambda: {"RUB": 0.99, "USD": 0.01})
     maturity: list[MaturityBucket] = field(default_factory=lambda: [
-        MaturityBucket(0.08, 1, 0.25, "до 1 года"),
-        MaturityBucket(1, 3, 0.30, "1–3 года"),
-        MaturityBucket(3, 5, 0.15, "3–5 лет"),
-        MaturityBucket(5, 10, 0.15, "5–10 лет"),
-        MaturityBucket(10, 30, 0.15, "свыше 10 лет"),
+        MaturityBucket(0.08, 1, 0.25, "<1Y"),
+        MaturityBucket(1, 3, 0.30, "1–3Y"),
+        MaturityBucket(3, 5, 0.15, "3–5Y"),
+        MaturityBucket(5, 10, 0.15, "5–10Y"),
+        MaturityBucket(10, 30, 0.15, ">10Y"),
     ])
     payment_types: dict[str, float] = field(default_factory=lambda: {"ANN": 0.6, "RGM": 0.15, "SIMPLE": 0.25})
     rate_types: dict[str, float] = field(default_factory=lambda: {"FIXED": 0.8, "FLOAT": 0.2})
@@ -111,7 +111,7 @@ class GeneratorParams:
 
     def validate(self) -> None:
         if not 1 <= self.rows <= MAX_ROWS:
-            raise ValueError(f"rows: от 1 до {MAX_ROWS:,}".replace(",", " "))
+            raise ValueError(f"rows: 1 to {MAX_ROWS:,}")
         date.fromisoformat(self.report_date)
         _shares("currency", self.currency, None)
         _shares("payment_types", self.payment_types, PAYMENT_TYPES)
@@ -119,33 +119,33 @@ class GeneratorParams:
         _shares("payment_frequency", self.payment_frequency, FREQUENCIES)
         _shares("prepayment", self.prepayment, None)
         if not self.maturity:
-            raise ValueError("maturity: нужен хотя бы один интервал сроков")
+            raise ValueError("maturity: at least one bucket is required")
         for b in self.maturity:
             if not 0 < b.min_years < b.max_years <= 50:
-                raise ValueError(f"maturity: интервал {b.min_years}–{b.max_years} лет задан неверно")
+                raise ValueError(f"maturity: bucket {b.min_years}–{b.max_years}Y is invalid")
             if b.share < 0:
-                raise ValueError("maturity: доли не могут быть отрицательными")
+                raise ValueError("maturity: shares cannot be negative")
         if sum(b.share for b in self.maturity) <= 0:
-            raise ValueError("maturity: сумма долей должна быть больше нуля")
+            raise ValueError("maturity: shares must sum above zero")
         for name, r, lo, hi in (("amount", self.amount, 1, 1e12), ("fixed_rate", self.fixed_rate, -0.05, 1),
                                 ("float_spread", self.float_spread, -0.05, 0.5),
                                 ("subsidy_spread", self.subsidy_spread, -0.05, 0.5)):
             if not lo <= r.min <= r.max <= hi:
-                raise ValueError(f"{name}: нужен min ≤ max в пределах [{lo}; {hi}]")
+                raise ValueError(f"{name}: need min ≤ max within [{lo}, {hi}]")
         if not 0 <= self.subsidy_share <= 1:
-            raise ValueError("subsidy_share: доля от 0 до 1")
+            raise ValueError("subsidy_share: must be between 0 and 1")
 
 
 def _shares(name: str, shares: dict[str, float], allowed: tuple[str, ...] | None) -> None:
     if not shares:
-        raise ValueError(f"{name}: распределение пустое")
+        raise ValueError(f"{name}: empty distribution")
     for k, v in shares.items():
         if allowed is not None and k not in allowed:
-            raise ValueError(f"{name}: неизвестное значение {k!r}, допустимы {', '.join(allowed)}")
+            raise ValueError(f"{name}: unknown value {k!r}, allowed: {', '.join(allowed)}")
         if v < 0 or not math.isfinite(v):
-            raise ValueError(f"{name}: доли не могут быть отрицательными")
+            raise ValueError(f"{name}: shares cannot be negative")
     if sum(shares.values()) <= 0:
-        raise ValueError(f"{name}: сумма долей должна быть больше нуля")
+        raise ValueError(f"{name}: shares must sum above zero")
 
 
 def add_months(d: date, months: int) -> date:

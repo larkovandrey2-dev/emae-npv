@@ -23,21 +23,21 @@ class TemplateExplainer:
         def find(prefix: str) -> list[dict[str, Any]]:
             return [f for f in items if f["label"].startswith(prefix)]
 
-        contrib = sorted(find("Вклад в изменение ЭКпрбк"), key=lambda f: -abs(f["value"]))
+        contrib = sorted(find("EC Shapley"), key=lambda f: -abs(f["value"]))
         blocks = [_block("metrics", fact_ids=[f["id"] for f in items[:3]])]
         if contrib:
             top = contrib[0]
-            name = top["label"].split(": ", 1)[1].replace(" (Шепли)", "")
-            blocks.append(_block("text", f"Главный вклад дал фактор **{name}**: {{{{{top['id']}}}}}."))
+            name = top["label"].split(": ", 1)[1]
+            blocks.append(_block("text", f"Largest contribution: **{name}**, {{{{{top['id']}}}}}."))
         blocks.append(_block("chart", chart="bridge", metric="ec"))
         blocks.append(_block("chart", chart="timeline", metric="ec"))
         rel = facts.get("reliability", {})
         if rel.get("confidence") != "high":
-            reasons = rel.get("reasons") or ["выводы модели ограничены"]
-            blocks.append(_block("callout", f"Надёжность ограничена: {reasons[0]}.", tone="warning"))
-        headline = f"ЭКпрбк изменился на {{{{{items[2]['id']}}}}} за период"
+            reasons = rel.get("reasons") or ["model findings are limited"]
+            blocks.append(_block("callout", f"Limited reliability: {reasons[0]}.", tone="warning"))
+        headline = f"EC changed by {{{{{items[2]['id']}}}}}"
         if question:
-            headline = "Без языковой модели отвечаю сводкой фактов"
+            headline = "No LLM available, here are the key facts"
         return {"headline": headline, "blocks": blocks,
-                "follow_ups": ["Какой фактор главный?", "Насколько можно доверять выводам?"],
+                "follow_ups": ["Which factor matters most?", "How reliable is this?"],
                 "confidence": rel.get("confidence", "low")}

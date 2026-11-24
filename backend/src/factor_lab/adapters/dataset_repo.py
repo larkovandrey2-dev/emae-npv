@@ -76,5 +76,5 @@ class PostgresDatasetRepository:
     def interrupted(self) -> None:
         """Generation does not survive a restart: mark leftovers failed."""
         with self.pool.connection() as c:
-            c.execute("UPDATE datasets SET status='failed', error='генерация прервана перезапуском сервиса',"
+            c.execute("UPDATE datasets SET status='failed', error='generation interrupted by a service restart',"
                       " updated_at=now() WHERE status='running'")

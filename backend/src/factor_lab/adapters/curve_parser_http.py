@@ -37,7 +37,7 @@ class CurveParserClient:
         try:
             r = self.client.get(f"{self.base_url}{path}", params=params or None)
         except httpx.HTTPError as exc:
-            raise CurveServiceError(f"curve-parser недоступен: {exc}") from exc
+            raise CurveServiceError(f"curve service unavailable: {exc}") from exc
         return r
 
     def dates(self, start: str, end: str) -> list[str]:
@@ -77,7 +77,7 @@ class CurveParserClient:
             self.ingest(start, on_or_before)
             found = self.dates(start, on_or_before)
         if not found:
-            raise CurveServiceError(f"нет кривой MOEX за {start}…{on_or_before}")
+            raise CurveServiceError(f"no MOEX curve for {start}…{on_or_before}")
         trade = max(found)
         r = self._get(f"/api/v1/curves/{trade}")
         if r.status_code != 200:

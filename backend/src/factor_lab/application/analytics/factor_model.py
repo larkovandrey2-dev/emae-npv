@@ -217,7 +217,7 @@ def analyze_panel(rows: list[dict], spec: PanelSpec, labels: dict[str, str] | No
     features, dropped = infer_schema(rows, exclude=exclude, group_col=spec.group_col, time_col=spec.time_col)
     out: dict[str, Any] = {"target": spec.target, "features": [f.__dict__ for f in features], "dropped": dropped}
     if not features or len(rows) < 2:
-        out["reliability"] = {"verdict": "insufficient", "reasons": ["нет пригодных признаков или наблюдений"]}
+        out["reliability"] = {"verdict": "insufficient", "reasons": ["no usable features or observations"]}
         return out
 
     X, vocab = encode(rows, features, spec.time_col)
@@ -231,13 +231,13 @@ def analyze_panel(rows: list[dict], spec: PanelSpec, labels: dict[str, str] | No
     reasons = []
     n_groups, n_periods = len(np.unique(groups)), len(np.unique(times))
     if len(rows) < MIN_ROWS:
-        reasons.append(f"мало наблюдений: {len(rows)} < {MIN_ROWS}")
+        reasons.append(f"too few observations: {len(rows)} < {MIN_ROWS}")
     if n_groups < MIN_ENTITIES:
-        reasons.append(f"мало сущностей: {n_groups} < {MIN_ENTITIES}")
+        reasons.append(f"too few deals: {n_groups} < {MIN_ENTITIES}")
     if n_periods < MIN_PERIODS:
-        reasons.append(f"мало периодов: {n_periods} < {MIN_PERIODS}")
+        reasons.append(f"too few periods: {n_periods} < {MIN_PERIODS}")
     if float(np.std(y)) == 0:
-        reasons.append("целевая метрика не меняется")
+        reasons.append("target does not vary")
     if reasons:
         out["reliability"] = {"verdict": "insufficient", "reasons": reasons}
         return out
@@ -354,10 +354,10 @@ def analyze_panel(rows: list[dict], spec: PanelSpec, labels: dict[str, str] | No
     verdict, why = "reliable", []
     if r2_gbm < GOOD_R2:
         verdict = "unreliable"
-        why.append(f"модель объясняет мало вариации: R² {r2_gbm:.2f} < {GOOD_R2}")
+        why.append(f"low R²: {r2_gbm:.2f} < {GOOD_R2}")
     ranks = [v for v in (stability["fold_rank_corr"], stability["hyperparam_rank_corr"], time_rank) if v is not None]
     if ranks and min(ranks) < STABLE_RANK:
         verdict = "unstable" if verdict == "reliable" else verdict
-        why.append(f"ранжирование факторов неустойчиво: min ρ = {min(ranks):.2f} < {STABLE_RANK}")
+        why.append(f"unstable ranking: min ρ = {min(ranks):.2f} < {STABLE_RANK}")
     out["reliability"] = {"verdict": verdict, "reasons": why}
     return out

@@ -43,7 +43,7 @@ def create_app(container: Container | None = None) -> FastAPI:
         yield
         runner.shutdown(wait=False, cancel_futures=True)
 
-    app = FastAPI(title="Factor Lab — оркестратор и факторный анализ ЭКпрбк", version="2.0.0", lifespan=lifespan)
+    app = FastAPI(title="Factor Lab: orchestrator and EC factor analysis", version="2.0.0", lifespan=lifespan)
 
     def c() -> Container:
         return app.state.c
@@ -83,7 +83,7 @@ def create_app(container: Container | None = None) -> FastAPI:
         try:
             return c().calculator.prepayment_defaults()
         except Exception as exc:
-            raise HTTPException(502, detail=f"калькулятор не ответил: {exc}") from exc
+            raise HTTPException(502, detail=f"calculator did not respond: {exc}") from exc
 
     @app.get("/api/v1/datasets")
     def list_datasets():
@@ -92,7 +92,7 @@ def create_app(container: Container | None = None) -> FastAPI:
     @app.post("/api/v1/datasets", status_code=202)
     def create_dataset(body: DatasetCreate):
         params = GeneratorParams.from_dict(body.params)  # ValueError -> 422
-        name = body.name.strip() or f"Синтетический портфель, {params.rows:,} сделок".replace(",", " ")
+        name = body.name.strip() or f"Synthetic, {params.rows:,} deals"
         return c().datasets.start(name, params)
 
     def _dataset(dataset_id: str) -> dict:
@@ -143,7 +143,7 @@ def create_app(container: Container | None = None) -> FastAPI:
         src = source(req.dataset)
         report_dates = src.summary()["report_dates"]
         if not report_dates:
-            raise HTTPException(422, detail="в источнике нет сделок")
+            raise HTTPException(422, detail="no deals in the source")
         report = report_dates[0]
         try:
             req_periods = cont.pipeline.periods(req, report)
